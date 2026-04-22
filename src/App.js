@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { CUSTOM_FONTS } from './customFonts';
 import { db, storage } from './firebase';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -35,9 +36,8 @@ const FONTS = [
   { name: 'Pretendard',    value: 'pretendard', family: `'Pretendard',sans-serif` },
   { name: 'Noto Sans KR',  value: 'noto',       family: `'Noto Sans KR',sans-serif` },
   { name: '나눔고딕',       value: 'nanum',      family: `'Nanum Gothic',sans-serif` },
-  { name: '나눔명조',       value: 'myeongjo',   family: `'Nanum Myeongjo',serif` },
-  { name: 'Gowun Dodum',   value: 'gowun',      family: `'Gowun Dodum',sans-serif` },
 ];
+const ALL_FONTS = [...FONTS, ...(CUSTOM_FONTS||[])];
 
 const API_KEYS = {
   aladin: 'ttbths030131740001',
@@ -56,6 +56,16 @@ function toDateStr(val) {
   const ms = toMs(val);
   if (!ms) return '';
   return new Date(ms).toISOString().split('T')[0];
+}
+function starStr(rating, max=5) {
+  if (!rating || rating<=0) return '—';
+  let s='';
+  for(let i=1;i<=max;i++){
+    if(rating>=i) s+='★';
+    else if(rating>=i-0.5) s+='½';
+    else s+='☆';
+  }
+  return s;
 }
 function setAccentVars(hex) {
   const r = parseInt(hex.slice(1,3),16)||0;
@@ -131,25 +141,41 @@ export default function App() {
   useEffect(()=>{ localStorage.setItem('username', username); },[username]);
 
   useEffect(()=>{
-    const f = FONTS.find(x=>x.value===font)||FONTS[0];
+    const base = process.env.PUBLIC_URL||'';
+    const faceCSS = (CUSTOM_FONTS||[]).map(f=>
+      `@font-face{font-family:${f.fontFamily};src:url("${base}/fonts/${encodeURIComponent(f.file)}")format("truetype");font-display:swap;}`
+    ).join('');
+    let faceEl = document.getElementById('custom-font-faces');
+    if(!faceEl){faceEl=document.createElement('style');faceEl.id='custom-font-faces';document.head.appendChild(faceEl);}
+    faceEl.textContent = faceCSS;
+  },[]);
+
+  useEffect(()=>{
+    if(view==='home'||view==='cal'){
+      document.body.style.overflowY='hidden';
+      document.documentElement.style.overflowY='hidden';
+    } else {
+      document.body.style.overflowY='';
+      document.documentElement.style.overflowY='';
+    }
+  },[view]);
+
+  useEffect(()=>{
+    const f = ALL_FONTS.find(x=>x.value===font)||FONTS[0];
     setAccentVars(accentColor);
     document.documentElement.style.setProperty('--font', f.family);
     document.body.style.fontFamily = f.family;
     // Safari fix: inject <style> with !important for font-family
     let styleEl = document.getElementById('font-override');
     if (!styleEl) { styleEl = document.createElement('style'); styleEl.id='font-override'; document.head.appendChild(styleEl); }
-    styleEl.textContent = `html,body,body *,input,button,select,textarea,h1,h2,h3,h4,h5,h6,p,span,div{font-family:${f.family}!important;-webkit-font-smoothing:antialiased;}`;
+    styleEl.textContent = `html,body,body *,input,button,select,textarea,h1,h2,h3,h4,h5,h6,p,span,div{font-family:${f.family}!important;-webkit-font-smoothing:antialiased;}.home-card-icon span,.home-topbar-icon{font-family:'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif!important;}.fab{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;line-height:1;}`;
     localStorage.setItem('accentColor', accentColor);
     localStorage.setItem('font', font);
   },[accentColor,font]);
 
   useEffect(()=>{
-    const lock = view==='home';
-    document.documentElement.style.overflow = lock ? 'hidden' : '';
-    document.body.style.overflow = lock ? 'hidden' : '';
-    document.body.style.position = lock ? 'fixed' : '';
-    document.body.style.width    = lock ? '100%'  : '';
-  },[view]);
+    window.scrollTo(0, 0);
+  },[view, type]);
 
   useEffect(()=>{ localStorage.setItem('calPicks', JSON.stringify(calPicks)); },[calPicks]);
   useEffect(()=>{ localStorage.setItem('goals', JSON.stringify(goals)); },[goals]);
@@ -237,6 +263,7 @@ export default function App() {
             items={items} calPicks={calPicks}
             onPickSet={(dateStr,itemId)=>setCalPicks(p=>({...p,[dateStr]:itemId}))}
             onDayPick={setDayPicker}
+            onSelect={setSelected}
           />
         )}
 
@@ -289,6 +316,7 @@ function Home({ items, username, goals, onSelect }) {
   const ingCount = items.filter(i=>i.status==='ing').length;
   const ingByType  = items.reduce((a,i)=>{ if(i.status==='ing')  a[i.type]=(a[i.type]||0)+1; return a; },{});
   const doneByType = items.reduce((a,i)=>{ if(i.status==='done') a[i.type]=(a[i.type]||0)+1; return a; },{});
+
   const thisYear   = new Date().getFullYear();
   const doneThisYear = items.filter(i=>{
     if(i.status!=='done') return false;
@@ -299,10 +327,8 @@ function Home({ items, username, goals, onSelect }) {
 
   return (
     <div className="home">
-      <div className="home-topbar">
-        <span className="home-topbar-icon">❤️</span>
-      </div>
-      <div className="home-greeting">
+      <div className="home-header">
+        <p className="home-header-lbl"><span className="home-topbar-icon">❤️</span></p>
         <h1 className="home-hello">Hello, {username}</h1>
         <p className="home-sub">You have <strong>{ingCount}</strong> item{ingCount!==1?'s':''} in progress this week.</p>
       </div>
@@ -314,8 +340,22 @@ function Home({ items, username, goals, onSelect }) {
           const pct    = goal>0 ? Math.min(100, Math.round(done/goal*100)) : 0;
           return (
             <button key={key} className="home-card" onClick={()=>onSelect(key)}>
-              <div className="home-card-icon">
-                <span>{val.emoji}</span>
+              <div className="home-card-top">
+                {goal>0 ? (
+                  <div className="home-card-ring"
+                    style={{background:`conic-gradient(var(--accent) ${pct}%, var(--border) 0%)`}}>
+                    <div className="home-card-icon"><span>{val.emoji}</span></div>
+                  </div>
+                ) : (
+                  <div className="home-card-icon"><span>{val.emoji}</span></div>
+                )}
+                {goal>0 && (
+                  <div className="home-card-goal-badge">
+                    <span className="hg-num">{done}</span>
+                    <span className="hg-sep">/</span>
+                    <span className="hg-total">{goal}</span>
+                  </div>
+                )}
               </div>
               <div className="home-card-body">
                 <span className="home-card-name">{val.name}</span>
@@ -323,14 +363,6 @@ function Home({ items, username, goals, onSelect }) {
                   <span className="home-card-active">{active} active</span>
                   <span className="home-card-arrow">→</span>
                 </div>
-                {goal>0 && (
-                  <div className="home-goal">
-                    <div className="home-goal-bar">
-                      <div className="home-goal-fill" style={{width:`${pct}%`}}/>
-                    </div>
-                    <span className="home-goal-label">{done}/{goal} ({pct}%)</span>
-                  </div>
-                )}
               </div>
             </button>
           );
@@ -345,44 +377,71 @@ function GameView({ items, groups, gameEvents, todos, gameTab, onGameTab, mode, 
   const [libStatus, setLibStatus] = useState('ing');
   const [searchOpen, setSearchOpen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
+  const [viewMode, setViewMode] = useState('gallery');
   const searchRef = useRef(null);
   const allItems = STATUS_ORDER.flatMap(s=>groups[s]||[]);
   const displayItems = libStatus==='all' ? allItems : (groups[libStatus]||[]);
 
   return (
     <div className="game-view">
-      {gameTab==='main' && (
-        <div className="page-header">
-          <h2 className="page-title">{TYPES.game.emoji} {TYPES.game.name}</h2>
-        </div>
-      )}
-
-      {gameTab==='lib' && (
-        <div className="lib-header">
-          <div className="lib-header-row">
-            <div>
-              <p className="lib-collection-lbl">COLLECTION</p>
-              <h2 className="lib-title">{TYPES.game.name} Gallery</h2>
-              <p className="lib-sub">{allItems.length} items curated by progress and sentiment.</p>
+      <div className="lib-sticky-header">
+        {gameTab==='main' ? (
+          <div className="lib-header">
+            <div className="lib-header-row">
+              <div>
+                <p className="lib-collection-lbl">GAMES</p>
+                <h2 className="lib-title">Calendar</h2>
+                <div className="lib-sub-spacer"/>
+              </div>
             </div>
-            <button className="lib-search-btn" onClick={()=>{
-              if(searchOpen){ onSearch(''); setSearchOpen(false); }
-              else { setSearchOpen(true); setTimeout(()=>searchRef.current?.focus(),50); }
-            }}>{searchOpen?'✕':'🔍'}</button>
           </div>
-          {searchOpen && (
-            <div className="lib-search-row">
-              <input ref={searchRef} type="search" placeholder="Search..." value={search}
-                onChange={e=>onSearch(e.target.value)} className="lib-search-input"/>
+        ) : (
+          <div className="lib-header">
+            <div className="lib-header-row">
+              <div>
+                <p className="lib-collection-lbl">COLLECTION</p>
+                <h2 className="lib-title">{TYPES.game.name} Gallery</h2>
+                <div className="lib-sub-spacer"/>
+              </div>
+              <button className="lib-search-btn" onClick={()=>{
+                if(searchOpen){ onSearch(''); setSearchOpen(false); }
+                else { setSearchOpen(true); setTimeout(()=>searchRef.current?.focus(),50); }
+              }}>{searchOpen?'✕':'🔍'}</button>
             </div>
-          )}
+            {searchOpen && (
+              <div className="lib-search-row">
+                <input ref={searchRef} type="search" placeholder="Search..." value={search}
+                  onChange={e=>onSearch(e.target.value)} className="lib-search-input"/>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="seg-ctrl">
+          <button className={gameTab==='main'?'active':''} onClick={()=>onGameTab('main')}>캘린더</button>
+          <button className={gameTab==='lib'?'active':''} onClick={()=>onGameTab('lib')}>라이브러리</button>
+        </div>
+      </div>
+      {gameTab==='lib' && (
+        <div className="lib-tabs-bar">
+          <div className="lib-tabs-row1">
+            <div className="lib-tabs">
+              {['all',...STATUS_ORDER].map(s=>(
+                <button key={s} className={`lib-tab-btn${libStatus===s?' active':''}`}
+                  onClick={()=>setLibStatus(s)}>
+                  {s==='all'?'All':s.charAt(0).toUpperCase()+s.slice(1)}
+                </button>
+              ))}
+            </div>
+            <button className="lib-filter-icon" onClick={()=>setShowFilter(v=>!v)}>⚙️</button>
+          </div>
+          <div className="lib-tabs-row2">
+            <div className="lib-view-toggle">
+              <button className={`lib-view-btn${viewMode==='gallery'?' active':''}`} onClick={()=>setViewMode('gallery')}><span className="vbtn-icon">⊞</span> 갤러리</button>
+              <button className={`lib-view-btn${viewMode==='list'?' active':''}`} onClick={()=>setViewMode('list')}><span className="vbtn-icon">☰</span> 목록</button>
+            </div>
+          </div>
         </div>
       )}
-
-      <div className="seg-ctrl">
-        <button className={gameTab==='main'?'active':''} onClick={()=>onGameTab('main')}>캘린더</button>
-        <button className={gameTab==='lib'?'active':''} onClick={()=>onGameTab('lib')}>라이브러리</button>
-      </div>
 
       {gameTab==='main' && (
         <>
@@ -394,17 +453,6 @@ function GameView({ items, groups, gameEvents, todos, gameTab, onGameTab, mode, 
 
       {gameTab==='lib' && (
         <>
-          <div className="lib-tabs-bar">
-            <div className="lib-tabs">
-              {['all',...STATUS_ORDER].map(s=>(
-                <button key={s} className={`lib-tab-btn${libStatus===s?' active':''}`}
-                  onClick={()=>setLibStatus(s)}>
-                  {s==='all'?'All':s.charAt(0).toUpperCase()+s.slice(1)}
-                </button>
-              ))}
-            </div>
-            <button className="lib-filter-icon" onClick={()=>setShowFilter(v=>!v)}>⚙️</button>
-          </div>
           {showFilter && (
             <div className="lib-filter-sheet">
               <div className="sort-bar">
@@ -425,12 +473,16 @@ function GameView({ items, groups, gameEvents, todos, gameTab, onGameTab, mode, 
             </div>
           )}
           {showMoney && <div className="money-banner">💰 총 지출: {totalPrice.toLocaleString()}원</div>}
-          <div className="status-grid">
-            {displayItems.length===0
-              ? <div className="lib-empty">No items with this status</div>
-              : displayItems.map(i=><StatusCard key={i.id} item={i} onClick={()=>onSelect(i)}/>)
-            }
-          </div>
+          {viewMode==='gallery' ? (
+            <div className="status-grid">
+              {displayItems.length===0
+                ? <div className="lib-empty">No items with this status</div>
+                : displayItems.map(i=><StatusCard key={i.id} item={i} onClick={()=>onSelect(i)}/>)
+              }
+            </div>
+          ) : (
+            <LibListView items={displayItems} type="game" onSelect={onSelect}/>
+          )}
         </>
       )}
     </div>
@@ -472,12 +524,10 @@ function GameCalendar({ gameEvents }) {
 
   return (
     <div className="gcal px20">
-      <div className="cal-nav">
-        <div className="cal-nav-btns">
-          <button onClick={()=>setMonth(new Date(year,m-1))}>‹</button>
-          <button onClick={()=>setMonth(new Date(year,m+1))}>›</button>
-        </div>
-        <h2>{year}년 {m+1}월</h2>
+      <div className="cal-nav-row">
+        <button className="cal-nav-arrow" onClick={()=>setMonth(new Date(year,m-1))}>‹</button>
+        <h2 className="cal-nav-title">{year}년 {m+1}월</h2>
+        <button className="cal-nav-arrow" onClick={()=>setMonth(new Date(year,m+1))}>›</button>
       </div>
       <div className="gcal-wrap">
         <div className="gcal-header">
@@ -805,45 +855,53 @@ function Category({ type, groups, mode, search, filterTag, allTags, sortBy, sort
   const [libStatus, setLibStatus] = useState('ing');
   const [searchOpen, setSearchOpen] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
-  const [filterName, setFilterName] = useState('');
-  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [viewMode, setViewMode] = useState('gallery');
   const searchRef = useRef(null);
   const allItems = STATUS_ORDER.flatMap(s=>groups[s]||[]);
   const displayItems = libStatus==='all' ? allItems : (groups[libStatus]||[]);
-  const typeFilters = (savedFilters||[]).filter(f=>f.type===type);
 
   return (
     <div className="category">
-      <div className="lib-header">
-        <div className="lib-header-row">
-          <div>
-            <p className="lib-collection-lbl">COLLECTION</p>
-            <h2 className="lib-title">{TYPES[type].name} Gallery</h2>
-            <p className="lib-sub">{allItems.length} items curated by progress and sentiment.</p>
+      <div className="lib-sticky-header">
+        <div className="lib-header">
+          <div className="lib-header-row">
+            <div>
+              <p className="lib-collection-lbl">COLLECTION</p>
+              <h2 className="lib-title">{TYPES[type].name} Gallery</h2>
+              <div className="lib-sub-spacer"/>
+            </div>
+            <button className="lib-search-btn" onClick={()=>{
+              if(searchOpen){ onSearch(''); setSearchOpen(false); }
+              else { setSearchOpen(true); setTimeout(()=>searchRef.current?.focus(),50); }
+            }}>{searchOpen?'✕':'🔍'}</button>
           </div>
-          <button className="lib-search-btn" onClick={()=>{
-            if(searchOpen){ onSearch(''); setSearchOpen(false); }
-            else { setSearchOpen(true); setTimeout(()=>searchRef.current?.focus(),50); }
-          }}>{searchOpen?'✕':'🔍'}</button>
+          {searchOpen && (
+            <div className="lib-search-row">
+              <input ref={searchRef} type="search" placeholder="Search..." value={search}
+                onChange={e=>onSearch(e.target.value)} className="lib-search-input"/>
+            </div>
+          )}
         </div>
-        {searchOpen && (
-          <div className="lib-search-row">
-            <input ref={searchRef} type="search" placeholder="Search..." value={search}
-              onChange={e=>onSearch(e.target.value)} className="lib-search-input"/>
-          </div>
-        )}
       </div>
 
       <div className="lib-tabs-bar">
-        <div className="lib-tabs">
-          {['all',...STATUS_ORDER].map(s=>(
-            <button key={s} className={`lib-tab-btn${libStatus===s?' active':''}`}
-              onClick={()=>setLibStatus(s)}>
-              {s==='all'?'All':s.charAt(0).toUpperCase()+s.slice(1)}
-            </button>
-          ))}
+        <div className="lib-tabs-row1">
+          <div className="lib-tabs">
+            {['all',...STATUS_ORDER].map(s=>(
+              <button key={s} className={`lib-tab-btn${libStatus===s?' active':''}`}
+                onClick={()=>setLibStatus(s)}>
+                {s==='all'?'All':s.charAt(0).toUpperCase()+s.slice(1)}
+              </button>
+            ))}
+          </div>
+          <button className="lib-filter-icon" onClick={()=>setShowFilter(v=>!v)}>⚙️</button>
         </div>
-        <button className="lib-filter-icon" onClick={()=>setShowFilter(v=>!v)}>⚙️</button>
+        <div className="lib-tabs-row2">
+          <div className="lib-view-toggle">
+            <button className={`lib-view-btn${viewMode==='gallery'?' active':''}`} onClick={()=>setViewMode('gallery')}><span className="vbtn-icon">⊞</span> 갤러리</button>
+            <button className={`lib-view-btn${viewMode==='list'?' active':''}`} onClick={()=>setViewMode('list')}><span className="vbtn-icon">☰</span> 목록</button>
+          </div>
+        </div>
       </div>
 
       {showFilter && (
@@ -863,56 +921,21 @@ function Category({ type, groups, mode, search, filterTag, allTags, sortBy, sort
               ))}
             </div>
           )}
-          <div className="fav-filter-section">
-            <div className="fav-filter-header">
-              <span className="fav-filter-title">즐겨찾기</span>
-              <button className="fav-save-btn" onClick={()=>setShowSaveInput(v=>!v)}>
-                {showSaveInput?'취소':'+ 현재 필터 저장'}
-              </button>
-            </div>
-            {showSaveInput && (
-              <div className="fav-save-row">
-                <input
-                  type="text" placeholder="이름 입력 (예: 별점 높은 순)"
-                  value={filterName} onChange={e=>setFilterName(e.target.value)}
-                  className="fav-name-input"
-                  onKeyDown={e=>{ if(e.key==='Enter' && filterName.trim()){ onSaveFilter({name:filterName.trim(),type,sortBy,sortDir,filterTag}); setFilterName(''); setShowSaveInput(false); }}}
-                />
-                <button className="btn-primary-sm" onClick={()=>{
-                  if(!filterName.trim()) return;
-                  onSaveFilter({name:filterName.trim(),type,sortBy,sortDir,filterTag});
-                  setFilterName(''); setShowSaveInput(false);
-                }}>저장</button>
-              </div>
-            )}
-            {typeFilters.length>0 && (
-              <div className="fav-chips">
-                {typeFilters.map((f,i)=>{
-                  const globalIdx = (savedFilters||[]).findIndex(x=>x===f);
-                  return (
-                    <div key={i} className="fav-chip">
-                      <button className="fav-chip-apply" onClick={()=>{ onSort(f.sortBy); if(f.sortDir!==sortDir) onSort(f.sortBy); onFilterTag(f.filterTag||null); }}>
-                        {f.name}
-                      </button>
-                      <button className="fav-chip-del" onClick={()=>onDeleteFilter(globalIdx)}>×</button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {typeFilters.length===0 && !showSaveInput && <p className="fav-empty">저장된 필터 없음</p>}
-          </div>
         </div>
       )}
 
       {showMoney && <div className="money-banner">💰 총 지출: {totalPrice.toLocaleString()}원</div>}
 
-      <div className="status-grid">
-        {displayItems.length===0
-          ? <div className="lib-empty">No items with this status</div>
-          : displayItems.map(i=><StatusCard key={i.id} item={i} onClick={()=>onSelect(i)}/>)
-        }
-      </div>
+      {viewMode==='gallery' ? (
+        <div className="status-grid">
+          {displayItems.length===0
+            ? <div className="lib-empty">No items with this status</div>
+            : displayItems.map(i=><StatusCard key={i.id} item={i} onClick={()=>onSelect(i)}/>)
+          }
+        </div>
+      ) : (
+        <LibListView items={displayItems} type={type} onSelect={onSelect}/>
+      )}
     </div>
   );
 }
@@ -933,15 +956,80 @@ function Card({ item, onClick }) {
   );
 }
 function StatusCard({ item, onClick }) {
+  const pct = item.progressTotal>0 && item.progressCurrent>0
+    ? Math.min(100, Math.round(item.progressCurrent/item.progressTotal*100))
+    : null;
   return (
     <div className="status-card" onClick={onClick}>
       {item.cover
         ? <img src={item.cover} alt={item.title} className="status-card-img"/>
         : <div className="status-card-img status-card-ph">{TYPES[item.type]?.emoji||'📦'}</div>
       }
+      {pct!==null && (
+        <div className="status-card-pct-bar">
+          <div className="status-card-pct-fill" style={{width:`${pct}%`}}/>
+        </div>
+      )}
       <div className="status-card-overlay">
         <span className="status-card-title">{item.title}</span>
       </div>
+    </div>
+  );
+}
+
+/* ── LIST VIEW ── */
+const REPLAY_LABEL = { game:'플레이 횟수', video:'시청 횟수', book:'회독수', novel:'회독수', comic:'회독수' };
+
+function LibListView({ items, type, onSelect }) {
+  if(items.length===0) return <div className="lib-empty">No items with this status</div>;
+  return (
+    <div className="lib-list-view">
+      <div className="lib-list-header">
+        <span className="lib-list-head">제목</span>
+        <span className="lib-list-head lib-list-head-c">상태</span>
+        <span className="lib-list-head lib-list-head-c">별점</span>
+        <span className="lib-list-head lib-list-head-r">반복</span>
+      </div>
+      {items.map(i=>(
+        <div key={i.id} className="lib-list-row" onClick={()=>onSelect(i)}>
+          <span className="lib-list-title">{i.title}</span>
+          <span className="lib-list-col"><span className={`lib-status-badge lib-s-${i.status||'want'}`}>{i.status||'—'}</span></span>
+          <span className="lib-list-col">{i.rating>0?<StarDisplay value={i.rating}/>:'—'}</span>
+          <span className="lib-list-col" style={{textAlign:'right'}}>{i.replayCount>0?i.replayCount:'—'}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StarDisplay({ value, max=5 }) {
+  if (!value || value <= 0) return <span>—</span>;
+  return (
+    <span className="star-display">
+      {Array.from({length: max}, (_, i) => {
+        const n = i + 1;
+        const isFull = value >= n;
+        const isHalf = !isFull && value >= n - 0.5;
+        return <span key={n} className={`sd-star${isFull?' full':isHalf?' half':''}`}>★</span>;
+      })}
+    </span>
+  );
+}
+
+function StarInput({ value, onChange }) {
+  return (
+    <div className="star-input">
+      {[1,2,3,4,5].map(n=>{
+        const isFull = value>=n;
+        const isHalf = !isFull && value>=n-0.5;
+        return (
+          <span key={n} className="star-cell">
+            <button className="star-half left" onClick={()=>onChange(value===n-0.5?0:n-0.5)}/>
+            <button className="star-half right" onClick={()=>onChange(value===n?0:n)}/>
+            <span className={`star-glyph${isFull?' full':isHalf?' half':''}`}>★</span>
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -970,9 +1058,12 @@ function Wishlist({ items, onSelect }) {
   const byType = items.reduce((a,i)=>{ if(!a[i.type])a[i.type]=[]; a[i.type].push(i); return a; },{});
   return (
     <div className="wishlist-page">
-      <h2 className="page-title" style={{color:'var(--accent)'}}>⭐ 위시리스트</h2>
+      <div className="wishlist-sticky-hd">
+        <p className="lib-collection-lbl">WISHLIST</p>
+        <h2 className="lib-title">Wishlist</h2>
+      </div>
       {items.length===0
-        ? <div className="empty-state"><div className="empty-emoji">⭐</div><p>위시리스트가 비어있어요</p></div>
+        ? <div className="empty-state"><div className="empty-emoji">⭐</div><p>Wishlist is empty</p></div>
         : Object.entries(byType).map(([t,its])=><WishGroup key={t} t={t} its={its} onSelect={onSelect}/>)
       }
     </div>
@@ -980,7 +1071,7 @@ function Wishlist({ items, onSelect }) {
 }
 
 /* ── CALENDAR (content) ── */
-function CalendarView({ items, calPicks, onPickSet, onDayPick }) {
+function CalendarView({ items, calPicks, onPickSet, onDayPick, onSelect }) {
   const [month, setMonth]       = useState(new Date());
   const [showDate, setShowDate] = useState(false);
   const [calTab, setCalTab]     = useState('cal'); // 'cal' | 'stats' | 'reviews'
@@ -1034,24 +1125,15 @@ function CalendarView({ items, calPicks, onPickSet, onDayPick }) {
 
   // 리뷰 피드 (전체, done + review 있는 것)
   const reviewItems = [...items]
-    .filter(i=>i.status==='done' && i.review?.trim())
-    .sort((a,b)=>(toMs(b.endDate)||toMs(b.viewDate)||0)-(toMs(a.endDate)||toMs(a.viewDate)||0));
+    .filter(i=>i.review?.trim())
+    .sort((a,b)=>(toMs(b.endDate)||toMs(b.viewDate)||toMs(b.createdAt)||0)-(toMs(a.endDate)||toMs(a.viewDate)||toMs(a.createdAt)||0));
 
   return (
     <div className="cal-page">
-      <div className="cal-nav">
-        <div className="cal-nav-btns">
-          <button onClick={()=>setMonth(new Date(year,m-1))}>‹</button>
-          <button onClick={()=>setMonth(new Date(year,m+1))}>›</button>
-        </div>
-        <div className="cal-nav-right">
-          {calTab==='cal' && (
-            <button className={`cal-date-toggle${showDate?' active':''}`} onClick={()=>setShowDate(v=>!v)}>
-              {showDate?'숨기기':'날짜'}
-            </button>
-          )}
-          <h2>{year}년 {m+1}월</h2>
-        </div>
+      <div className="cal-nav-row">
+        <button className="cal-nav-arrow" onClick={()=>setMonth(new Date(year,m-1))}>‹</button>
+        <h2 className="cal-nav-title">{year}년 {m+1}월</h2>
+        <button className="cal-nav-arrow" onClick={()=>setMonth(new Date(year,m+1))}>›</button>
       </div>
 
       <div className="cal-tab-bar">
@@ -1061,66 +1143,78 @@ function CalendarView({ items, calPicks, onPickSet, onDayPick }) {
       </div>
 
       {calTab==='cal' && (
-        <div className="cal-grid-wrap">
-          <div className="cal-weekdays">
-            {['일','월','화','수','목','금','토'].map(d=><div key={d} className="weekday">{d}</div>)}
+        <div className="cal-icon-row">
+          <button className={`cal-icon-btn${showDate?' active':''}`} onClick={()=>setShowDate(v=>!v)}>📅</button>
+        </div>
+      )}
+
+      {calTab==='cal' && (
+        <div className="cal-tab-content">
+          <div className="cal-grid-wrap">
+            <div className="cal-weekdays">
+              {['일','월','화','수','목','금','토'].map(d=><div key={d} className="weekday">{d}</div>)}
+            </div>
+            <div className="cal-grid-full">{cells}</div>
           </div>
-          <div className="cal-grid-full">{cells}</div>
         </div>
       )}
 
       {calTab==='stats' && (
-        <div className="stats-wrap">
-          <div className="stats-hero">
-            <div className="stats-hero-num">{monthDone.length}</div>
-            <div className="stats-hero-label">{m+1}월 완료</div>
-            {avgRating && <div className="stats-hero-rating">평균 ⭐ {avgRating}</div>}
-          </div>
-          {Object.keys(TYPES).length>0 && (
-            <div className="stats-type-list">
-              {Object.entries(TYPES).map(([k,v])=>{
-                const cnt=monthDoneByType[k]||0;
-                const max=Math.max(...Object.values(monthDoneByType),1);
-                return (
-                  <div key={k} className="stats-type-row">
-                    <span className="stats-type-emoji">{v.emoji}</span>
-                    <span className="stats-type-name">{v.name}</span>
-                    <div className="stats-type-bar-wrap">
-                      <div className="stats-type-bar" style={{width:cnt?`${Math.round(cnt/max*100)}%`:'0%'}}/>
-                    </div>
-                    <span className="stats-type-cnt">{cnt}</span>
-                  </div>
-                );
-              })}
+        <div className="cal-tab-content scrollable">
+          <div className="stats-wrap">
+            <div className="stats-hero">
+              <div className="stats-hero-num">{monthDone.length}</div>
+              <div className="stats-hero-label">{m+1}월 완료</div>
+              {avgRating && <div className="stats-hero-rating">평균 ★ {avgRating}</div>}
             </div>
-          )}
-          {monthDone.length===0 && <p className="stats-empty">이번 달 완료한 항목이 없어요</p>}
+            {Object.keys(TYPES).length>0 && (
+              <div className="stats-type-list">
+                {Object.entries(TYPES).map(([k,v])=>{
+                  const cnt=monthDoneByType[k]||0;
+                  const max=Math.max(...Object.values(monthDoneByType),1);
+                  return (
+                    <div key={k} className="stats-type-row">
+                      <span className="stats-type-emoji">{v.emoji}</span>
+                      <span className="stats-type-name">{v.name}</span>
+                      <div className="stats-type-bar-wrap">
+                        <div className="stats-type-bar" style={{width:cnt?`${Math.round(cnt/max*100)}%`:'0%'}}/>
+                      </div>
+                      <span className="stats-type-cnt">{cnt}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {monthDone.length===0 && <p className="stats-empty">이번 달 완료한 항목이 없어요</p>}
+          </div>
         </div>
       )}
 
       {calTab==='reviews' && (
-        <div className="review-feed">
-          {reviewItems.length===0 && <p className="stats-empty">리뷰가 달린 완료 항목이 없어요</p>}
-          {reviewItems.map(item=>{
-            const dateMs = toMs(item.endDate)||toMs(item.viewDate);
-            return (
-              <div key={item.id} className="review-card">
-                {item.cover
-                  ? <img src={item.cover} alt="" className="review-thumb"/>
-                  : <div className="review-thumb review-thumb-ph">{TYPES[item.type]?.emoji}</div>
-                }
-                <div className="review-body">
-                  <div className="review-meta">
-                    <span className="review-type">{TYPES[item.type]?.name}</span>
-                    {item.rating>0 && <span className="review-stars">{'⭐'.repeat(item.rating)}</span>}
+        <div className="cal-tab-content scrollable">
+          <div className="review-feed">
+            {reviewItems.length===0 && <p className="stats-empty">리뷰가 없어요</p>}
+            {reviewItems.map(item=>{
+              const dateMs = toMs(item.endDate)||toMs(item.viewDate)||toMs(item.createdAt);
+              return (
+                <div key={item.id} className="review-card" onClick={()=>onSelect&&onSelect(item)} style={{cursor:'pointer'}}>
+                  {item.cover
+                    ? <img src={item.cover} alt="" className="review-thumb"/>
+                    : <div className="review-thumb review-thumb-ph">{TYPES[item.type]?.emoji}</div>
+                  }
+                  <div className="review-body">
+                    <div className="review-meta">
+                      <span className="review-type">{TYPES[item.type]?.name}</span>
+                      {item.rating>0 && <StarDisplay value={item.rating}/>}
+                    </div>
+                    <p className="review-title">{item.title}</p>
+                    <p className="review-text">{item.review}</p>
+                    {dateMs && <span className="review-date">{new Date(dateMs).toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'})}</span>}
                   </div>
-                  <p className="review-title">{item.title}</p>
-                  <p className="review-text">{item.review}</p>
-                  {dateMs && <span className="review-date">{new Date(dateMs).toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'})}</span>}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -1152,6 +1246,30 @@ function DayPickSheet({ items, dateStr, currentPick, onPick, onClose }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── CUSTOM FONT PICKER ── */
+function CustomFontPicker({ font, onFont }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="custom-font-section">
+      <button className="custom-font-toggle" onClick={()=>setOpen(v=>!v)}>
+        커스텀 폰트 <span className="custom-font-arrow">{open?'▴':'▾'}</span>
+      </button>
+      {open && (
+        <div className="font-list custom-font-list">
+          {CUSTOM_FONTS.map(f=>(
+            <button key={f.value} className={`font-btn${font===f.value?' active':''}`}
+              style={{fontFamily:f.family}}
+              onClick={()=>{ onFont(f.value); setOpen(false); }}>
+              <span className="font-name">{f.name}</span>
+              <span className="font-preview">가나다 ABC 123</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1221,7 +1339,7 @@ function Settings({ accentColor, font, username, onAccentColor, onFont, onUserna
         </div>
       </div>
       <div className="setting-card">
-        <h3>폰트 <span className="setting-note">(모두 무료·상업이용가)</span></h3>
+        <h3>폰트 <span className="setting-note">(무료·상업이용가)</span></h3>
         <div className="font-list">
           {FONTS.map(f=>(
             <button key={f.value} className={`font-btn${font===f.value?' active':''}`} style={{fontFamily:f.family}} onClick={()=>onFont(f.value)}>
@@ -1230,6 +1348,7 @@ function Settings({ accentColor, font, username, onAccentColor, onFont, onUserna
             </button>
           ))}
         </div>
+        {CUSTOM_FONTS&&CUSTOM_FONTS.length>0&&<CustomFontPicker font={font} onFont={onFont}/>}
       </div>
       <div className="setting-card">
         <h3>연간 목표 <span className="setting-note">(올해 완료 목표 수)</span></h3>
@@ -1354,6 +1473,8 @@ function AddModal({ type, onClose }) {
 }
 
 /* ── DETAIL MODAL ── */
+const PROGRESS_UNIT = { game:'시간', video:'화', book:'페이지', novel:'페이지', comic:'화' };
+
 function DetailModal({ item, onClose }) {
   const [data, setData] = useState({...item});
   const [tab, setTab]   = useState('info');
@@ -1363,11 +1484,21 @@ function DetailModal({ item, onClose }) {
   const [noteSpeaker, setNoteSpkr]  = useState('');
   const [noteFile, setNoteFile]     = useState(null);
   const [notePreview, setNotePreview] = useState(null);
-  const [journalText, setJText]     = useState('');
   const [newTag, setNewTag]         = useState('');
+  const coverFileRef = useRef(null);
 
-  const update=async()=>{ await updateDoc(doc(db,'items',item.id),data); onClose(); };
-  const remove=async()=>{ if(window.confirm('삭제?')){ await deleteDoc(doc(db,'items',item.id)); onClose(); } };
+  const update=async()=>{ onClose(); updateDoc(doc(db,'items',item.id),data); };
+  const remove=async()=>{ if(window.confirm('삭제?')){ onClose(); deleteDoc(doc(db,'items',item.id)); } };
+
+  const handleCoverFile = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const sr = ref(storage, `covers/${Date.now()}_${f.name}`);
+      await uploadBytes(sr, f);
+      const url = await getDownloadURL(sr);
+      setData(d => ({...d, cover: url}));
+    } catch(err) { console.error(err); }
+  };
 
   const changeStatus=s=>{
     const up={status:s};
@@ -1413,19 +1544,14 @@ function DetailModal({ item, onClose }) {
 
   const removeNote=idx=>setData({...data, notes:(data.notes||[]).filter((_,i)=>i!==idx)});
 
-  const addJournal=()=>{
-    if(!journalText.trim())return;
-    setData({...data, journal:[...(data.journal||[]),{text:journalText, date:new Date()}]});
-    setJText('');
-  };
-
   const filteredNotes=(data.notes||[]).filter(n=>{
     if(!noteSearch) return true;
     const q=noteSearch.toLowerCase();
     return (n.text||'').toLowerCase().includes(q)||(n.speaker||'').toLowerCase().includes(q)||(n.caption||'').toLowerCase().includes(q);
   });
 
-  const dateLabel = data.type==='video'?'본':'하거나 읽은';
+  const pct = data.progressTotal>0 && data.progressCurrent>0
+    ? Math.min(100, Math.round(data.progressCurrent/data.progressTotal*100)) : null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -1438,6 +1564,8 @@ function DetailModal({ item, onClose }) {
             : <div className="dm-hero-ph">{TYPES[data.type]?.emoji||'📦'}</div>
           }
           <button className="dm-close" onClick={onClose}>×</button>
+          <button className="dm-cover-edit" onClick={()=>coverFileRef.current?.click()}>📷</button>
+          <input ref={coverFileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleCoverFile}/>
           <div className="dm-hero-foot">
             <span className="dm-type-badge">{TYPES[data.type]?.name}</span>
             <span className={`dm-status-badge dm-status-${data.status||'want'}`}>
@@ -1446,17 +1574,11 @@ function DetailModal({ item, onClose }) {
           </div>
         </div>
 
-        {/* Title row */}
-        <div className="dm-title-row">
-          <h2 className="dm-title">{data.title||'상세'}</h2>
-          {data.rating>0&&<div className="dm-stars">{'⭐'.repeat(data.rating)}</div>}
-        </div>
-
         {/* Tabs */}
         <div className="dm-tabs">
-          {['info','notes','journal'].map((t,i)=>(
+          {['info','notes','review'].map((t,i)=>(
             <button key={t} className={`dm-tab${tab===t?' active':''}`} onClick={()=>setTab(t)}>
-              {['정보','메모','일지'][i]}
+              {['정보','메모','리뷰'][i]}
             </button>
           ))}
         </div>
@@ -1464,60 +1586,109 @@ function DetailModal({ item, onClose }) {
         <div className="modal-body">
 
           {tab==='info'&&(
-            <>
-              <label>제목</label>
-              <input type="text" value={data.title||''} onChange={e=>setData({...data,title:e.target.value})}/>
-              <label>상태</label>
-              <select value={data.status||'want'} onChange={e=>changeStatus(e.target.value)}>
-                {Object.entries(STATUS[data.type]||{}).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-              </select>
+            <div className="notion-props">
+              <input type="text" className="notion-title-input"
+                value={data.title||''} onChange={e=>setData({...data,title:e.target.value})}
+                placeholder="제목"/>
 
-              <label>태그</label>
-              <div className="tag-input-row">
-                <input type="text" placeholder="태그 입력" value={newTag}
-                  onChange={e=>setNewTag(e.target.value)} onKeyPress={e=>e.key==='Enter'&&addTag()}/>
-                <button className="btn-primary-sm" onClick={addTag}>추가</button>
-              </div>
-              <div className="tags-display">
-                {(data.tags||[]).map(t=>(
-                  <span key={t} className="tag">#{t}
-                    <button onClick={()=>setData({...data,tags:(data.tags||[]).filter(x=>x!==t)})}>×</button>
-                  </span>
-                ))}
+              <div className="nprop-row">
+                <span className="nprop-key">상태</span>
+                <select className="nprop-select" value={data.status||'want'} onChange={e=>changeStatus(e.target.value)}>
+                  {Object.entries(STATUS[data.type]||{}).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+                </select>
               </div>
 
-              <div className="dm-meta-grid">
-                {data.type==='video'&&(
-                  <div className="dm-meta-item"><label>감독</label><input type="text" value={data.director||''} onChange={e=>setData({...data,director:e.target.value})}/></div>
-                )}
-                {(data.type==='book'||data.type==='novel'||data.type==='comic')&&(
-                  <div className="dm-meta-item"><label>작가</label><input type="text" value={data.author||''} onChange={e=>setData({...data,author:e.target.value})}/></div>
-                )}
-                <div className="dm-meta-item"><label>장르</label><input type="text" value={data.genre||''} onChange={e=>setData({...data,genre:e.target.value})}/></div>
-                <div className="dm-meta-item"><label>가격 (원)</label><input type="number" value={data.price||''} onChange={e=>setData({...data,price:e.target.value})}/></div>
-              </div>
-
-              <label>별점</label>
-              <div className="rating-row">
-                {[1,2,3,4,5].map(r=>(
-                  <button key={r} className={`star-btn${data.rating>=r?' active':''}`} onClick={()=>setData({...data,rating:r})}>⭐</button>
-                ))}
-              </div>
-
-              <div className="dm-meta-grid">
-                <div className="dm-meta-item">
-                  <label>시작 날짜</label>
-                  <input type="date" value={toDateStr(data.startDate)} onChange={e=>setData({...data,startDate:e.target.value?new Date(e.target.value):null})}/>
-                </div>
-                <div className="dm-meta-item">
-                  <label>{dateLabel} 날짜</label>
-                  <input type="date" value={toDateStr(data.endDate||data.viewDate)} onChange={e=>setData({...data,endDate:e.target.value?new Date(e.target.value):null,viewDate:e.target.value?new Date(e.target.value):null})}/>
+              <div className="nprop-row nprop-tags-row">
+                <span className="nprop-key">태그</span>
+                <div className="nprop-tags-val">
+                  {(data.tags||[]).map(t=>(
+                    <span key={t} className="tag">#{t}
+                      <button onClick={()=>setData({...data,tags:(data.tags||[]).filter(x=>x!==t)})}>×</button>
+                    </span>
+                  ))}
+                  <input type="text" className="nprop-tag-input" placeholder="+" value={newTag}
+                    onChange={e=>setNewTag(e.target.value)}
+                    onKeyPress={e=>e.key==='Enter'&&addTag()}/>
                 </div>
               </div>
 
-              <label>리뷰</label>
-              <textarea value={data.review||''} onChange={e=>setData({...data,review:e.target.value})} rows="4"/>
-            </>
+              <div className="nprop-row nprop-star-row">
+                <span className="nprop-key">별점</span>
+                <StarInput value={data.rating||0} onChange={v=>setData({...data,rating:v})}/>
+              </div>
+
+              <div className="nprop-row">
+                <span className="nprop-key">날짜</span>
+                <div className="nprop-dates">
+                  <input type="date" className="nprop-date-input"
+                    value={toDateStr(data.startDate)}
+                    onChange={e=>setData({...data,startDate:e.target.value?new Date(e.target.value):null})}/>
+                  <span className="nprop-date-sep">→</span>
+                  <input type="date" className="nprop-date-input"
+                    value={toDateStr(data.endDate||data.viewDate)}
+                    onChange={e=>setData({...data,endDate:e.target.value?new Date(e.target.value):null,viewDate:e.target.value?new Date(e.target.value):null})}/>
+                </div>
+              </div>
+
+              <div className="nprop-row nprop-progress-row">
+                <span className="nprop-key">진행률</span>
+                <div className="nprop-progress-val">
+                  <div className="progress-input-row">
+                    <input type="number" min="0" placeholder="현재"
+                      value={data.progressCurrent||''}
+                      onChange={e=>setData({...data,progressCurrent:e.target.value})}
+                      className="progress-num-input"/>
+                    <span className="progress-slash">/</span>
+                    <input type="number" min="0" placeholder="총"
+                      value={data.progressTotal||''}
+                      onChange={e=>setData({...data,progressTotal:e.target.value})}
+                      className="progress-num-input"/>
+                    <span className="progress-unit">{PROGRESS_UNIT[data.type]||''}</span>
+                  </div>
+                  {pct!==null && (
+                    <div className="progress-bar-wrap" style={{marginTop:6}}>
+                      <div className="progress-bar-fill" style={{width:`${pct}%`}}/>
+                      <span className="progress-pct">{pct}%</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="nprop-row">
+                <span className="nprop-key">{REPLAY_LABEL[data.type]||'반복'}</span>
+                <div className="replay-row">
+                  <button className="replay-btn" onClick={()=>setData({...data,replayCount:Math.max(0,(data.replayCount||0)-1)})}>−</button>
+                  <span className="replay-count">{data.replayCount||0}</span>
+                  <button className="replay-btn" onClick={()=>setData({...data,replayCount:(data.replayCount||0)+1})}>+</button>
+                  <span className="replay-unit">회</span>
+                </div>
+              </div>
+
+              {data.type==='video' && (
+                <div className="nprop-row">
+                  <span className="nprop-key">감독</span>
+                  <input type="text" className="nprop-input" value={data.director||''} onChange={e=>setData({...data,director:e.target.value})}/>
+                </div>
+              )}
+              {(data.type==='book'||data.type==='novel'||data.type==='comic') && (
+                <div className="nprop-row">
+                  <span className="nprop-key">작가</span>
+                  <input type="text" className="nprop-input" value={data.author||''} onChange={e=>setData({...data,author:e.target.value})}/>
+                </div>
+              )}
+              <div className="nprop-row">
+                <span className="nprop-key">장르</span>
+                <input type="text" className="nprop-input" value={data.genre||''} onChange={e=>setData({...data,genre:e.target.value})}/>
+              </div>
+              <div className="nprop-row">
+                <span className="nprop-key">가격</span>
+                <input type="number" className="nprop-input" value={data.price||''} onChange={e=>setData({...data,price:e.target.value})} placeholder="원"/>
+              </div>
+              <div className="nprop-row">
+                <span className="nprop-key">한줄평</span>
+                <input type="text" className="nprop-input" value={data.oneliner||''} onChange={e=>setData({...data,oneliner:e.target.value})} placeholder="한 줄로 남겨요"/>
+              </div>
+            </div>
           )}
 
           {tab==='notes'&&(
@@ -1526,13 +1697,11 @@ function DetailModal({ item, onClose }) {
                 <span>🔍</span>
                 <input type="text" placeholder="메모 검색" value={noteSearch} onChange={e=>setNoteSearch(e.target.value)} className="note-search"/>
               </div>
-
               <div className="note-type-sel">
                 {[['text','📝 텍스트'],['quote','💬 대사'],['photo','📷 사진']].map(([v,l])=>(
                   <button key={v} className={`ntype-btn${noteType===v?' active':''}`} onClick={()=>setNoteType(v)}>{l}</button>
                 ))}
               </div>
-
               <div className="add-note">
                 {noteType==='photo'&&(
                   <>
@@ -1552,7 +1721,6 @@ function DetailModal({ item, onClose }) {
                 )}
                 <button className="btn-primary" style={{marginTop:8,width:'100%'}} onClick={addNote}>추가</button>
               </div>
-
               <div className="notes-list">
                 {filteredNotes.map((n,i)=>(
                   <div key={i} className={`note-item note-${n.type||'text'}`}>
@@ -1571,26 +1739,15 @@ function DetailModal({ item, onClose }) {
             </>
           )}
 
-          {tab==='journal'&&(
-            <>
-              <div className="add-note">
-                <textarea placeholder={`오늘의 ${TYPES[data.type]?.name} 일지를 남겨보세요`} value={journalText}
-                  onChange={e=>setJText(e.target.value)} rows="4"/>
-                <button className="btn-primary" style={{marginTop:8,width:'100%'}} onClick={addJournal}>기록</button>
-              </div>
-              <div className="notes-list">
-                {(data.journal||[]).slice().reverse().map((j,i)=>(
-                  <div key={i} className="note-item">
-                    <p style={{whiteSpace:'pre-wrap'}}>{j.text}</p>
-                    <div className="note-foot">
-                      <small>📅 {new Date(toMs(j.date)||0).toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'})}</small>
-                      <button className="note-del" onClick={()=>setData({...data,journal:(data.journal||[]).filter((_,idx)=>(data.journal.length-1-i)!==idx)})}>×</button>
-                    </div>
-                  </div>
-                ))}
-                {(data.journal||[]).length===0&&<p className="empty-note">아직 일지가 없어요</p>}
-              </div>
-            </>
+          {tab==='review'&&(
+            <div className="review-tab-content">
+              <textarea className="review-textarea"
+                placeholder="리뷰를 남겨보세요..."
+                value={data.review||''}
+                onChange={e=>setData({...data,review:e.target.value})}
+                rows="10"/>
+              <p className="review-hint">저장 후 Activity 탭 리뷰에서 확인됩니다</p>
+            </div>
           )}
 
         </div>
