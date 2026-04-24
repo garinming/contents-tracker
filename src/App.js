@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { CUSTOM_FONTS } from './customFonts';
+import { Calendar, Tag, Star, BarChart2, Repeat2, Film, PenLine, Layers, Wallet, MessageSquare, Circle } from 'lucide-react';
 import { db, storage } from './firebase';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -99,7 +100,7 @@ async function searchAPI(query, type) {
       const data = await res.json();
       return (data.item||[]).map(i=>({
         title:  i.title.replace(/ *\([^)]*\) */g,''),
-        cover:  i.cover,
+        cover:  i.cover?.replace(/\/cover(sum|200)?\//, '/cover500/') || i.cover,
         author: i.author,
         year:   i.pubDate?.substring(0,4),
         genre:  i.categoryName?.split('>')[1]?.trim()
@@ -119,6 +120,7 @@ export default function App() {
   const [mode, setMode]         = useState('album');
   const [search, setSearch]     = useState('');
   const [selected, setSelected] = useState(null);
+  const [selectedInitTab, setSelectedInitTab] = useState('info');
   const [showAdd, setShowAdd]   = useState(false);
   const [filterTag, setFilterTag] = useState(null);
   const [sortBy, setSortBy]     = useState('date');
@@ -165,10 +167,16 @@ export default function App() {
     setAccentVars(accentColor);
     document.documentElement.style.setProperty('--font', f.family);
     document.body.style.fontFamily = f.family;
-    // Safari fix: inject <style> with !important for font-family
     let styleEl = document.getElementById('font-override');
     if (!styleEl) { styleEl = document.createElement('style'); styleEl.id='font-override'; document.head.appendChild(styleEl); }
-    styleEl.textContent = `html,body,body *,input,button,select,textarea,h1,h2,h3,h4,h5,h6,p,span,div{font-family:${f.family}!important;-webkit-font-smoothing:antialiased;}.home-card-icon span,.home-topbar-icon{font-family:'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif!important;}.fab{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;line-height:1;}`;
+    const base = process.env.PUBLIC_URL || '';
+    let faceDecl = '';
+    if (f.value === 'kopubdotum') {
+      faceDecl = `@font-face{font-family:'KoPubDotum';src:url('${base}/fonts/KoPubWorld Dotum Medium.ttf') format('truetype');font-weight:100 500;font-display:swap;}@font-face{font-family:'KoPubDotum';src:url('${base}/fonts/KoPubWorld Dotum Bold.ttf') format('truetype');font-weight:600 900;font-display:swap;}`;
+    } else if (f.file) {
+      faceDecl = `@font-face{font-family:'${f.fontFamily}';src:url('${base}/fonts/${f.file}') format('truetype');font-display:swap;}`;
+    }
+    styleEl.textContent = `${faceDecl}html,body,body *,input,button,select,textarea,h1,h2,h3,h4,h5,h6,p,span,div{font-family:${f.family}!important;-webkit-font-smoothing:antialiased;}.home-card-icon span,.home-topbar-icon,.stats-type-emoji{font-family:'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif!important;}.fab,.fab-plus{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;font-size:28px!important;line-height:1!important;}`;
     localStorage.setItem('accentColor', accentColor);
     localStorage.setItem('font', font);
   },[accentColor,font]);
@@ -264,6 +272,7 @@ export default function App() {
             onPickSet={(dateStr,itemId)=>setCalPicks(p=>({...p,[dateStr]:itemId}))}
             onDayPick={setDayPicker}
             onSelect={setSelected}
+            onSelectReview={item=>{ setSelectedInitTab('review'); setSelected(item); }}
           />
         )}
 
@@ -276,10 +285,11 @@ export default function App() {
       </div>
 
       {view==='cat' && type && (
-        <button className="fab" onClick={()=>setShowAdd(true)}>+</button>
+        <button className="fab" onClick={()=>setShowAdd(true)}><span className="fab-plus">+</span></button>
       )}
 
       <nav className="tabs">
+        <div className="sidebar-brand">내 컬렉션</div>
         {[
           {v:'home',     icon:'🏠', label:'Home'},
           {v:'cat',      icon:'📄', label:'Library'},
@@ -298,7 +308,7 @@ export default function App() {
       </nav>
 
       {showAdd && type && <AddModal type={type} onClose={()=>setShowAdd(false)} />}
-      {selected && <DetailModal item={selected} onClose={()=>setSelected(null)} />}
+      {selected && <DetailModal item={selected} initialTab={selectedInitTab} onClose={()=>{ setSelected(null); setSelectedInitTab('info'); }} />}
       {dayPicker && (
         <DayPickSheet
           items={dayPicker.items} dateStr={dayPicker.dateStr}
@@ -349,13 +359,11 @@ function Home({ items, username, goals, onSelect }) {
                 ) : (
                   <div className="home-card-icon"><span>{val.emoji}</span></div>
                 )}
-                {goal>0 && (
-                  <div className="home-card-goal-badge">
-                    <span className="hg-num">{done}</span>
-                    <span className="hg-sep">/</span>
-                    <span className="hg-total">{goal}</span>
-                  </div>
-                )}
+                <div className="home-card-goal-badge" style={{visibility: goal>0 ? 'visible' : 'hidden'}}>
+                  <span className="hg-num">{done}</span>
+                  <span className="hg-sep">/</span>
+                  <span className="hg-total">{goal}</span>
+                </div>
               </div>
               <div className="home-card-body">
                 <span className="home-card-name">{val.name}</span>
@@ -1071,7 +1079,7 @@ function Wishlist({ items, onSelect }) {
 }
 
 /* ── CALENDAR (content) ── */
-function CalendarView({ items, calPicks, onPickSet, onDayPick, onSelect }) {
+function CalendarView({ items, calPicks, onPickSet, onDayPick, onSelect, onSelectReview }) {
   const [month, setMonth]       = useState(new Date());
   const [showDate, setShowDate] = useState(false);
   const [calTab, setCalTab]     = useState('cal'); // 'cal' | 'stats' | 'reviews'
@@ -1114,6 +1122,7 @@ function CalendarView({ items, calPicks, onPickSet, onDayPick, onSelect }) {
 
   // 월간 통계
   const monthDone = items.filter(i=>{
+    if(i.status!=='done') return false;
     const ms = toMs(i.endDate)||toMs(i.viewDate);
     if(!ms) return false;
     const d = new Date(ms);
@@ -1125,7 +1134,13 @@ function CalendarView({ items, calPicks, onPickSet, onDayPick, onSelect }) {
 
   // 리뷰 피드 (전체, done + review 있는 것)
   const reviewItems = [...items]
-    .filter(i=>i.review?.trim())
+    .filter(i=>{
+      if(!i.review?.trim()) return false;
+      const dateMs = toMs(i.endDate)||toMs(i.viewDate)||toMs(i.createdAt);
+      if(!dateMs) return false;
+      const d = new Date(dateMs);
+      return d.getFullYear()===year && d.getMonth()===m;
+    })
     .sort((a,b)=>(toMs(b.endDate)||toMs(b.viewDate)||toMs(b.createdAt)||0)-(toMs(a.endDate)||toMs(a.viewDate)||toMs(a.createdAt)||0));
 
   return (
@@ -1197,7 +1212,7 @@ function CalendarView({ items, calPicks, onPickSet, onDayPick, onSelect }) {
             {reviewItems.map(item=>{
               const dateMs = toMs(item.endDate)||toMs(item.viewDate)||toMs(item.createdAt);
               return (
-                <div key={item.id} className="review-card" onClick={()=>onSelect&&onSelect(item)} style={{cursor:'pointer'}}>
+                <div key={item.id} className="review-card" onClick={()=>onSelectReview&&onSelectReview(item)} style={{cursor:'pointer'}}>
                   {item.cover
                     ? <img src={item.cover} alt="" className="review-thumb"/>
                     : <div className="review-thumb review-thumb-ph">{TYPES[item.type]?.emoji}</div>
@@ -1475,9 +1490,9 @@ function AddModal({ type, onClose }) {
 /* ── DETAIL MODAL ── */
 const PROGRESS_UNIT = { game:'시간', video:'화', book:'페이지', novel:'페이지', comic:'화' };
 
-function DetailModal({ item, onClose }) {
+function DetailModal({ item, initialTab='info', onClose }) {
   const [data, setData] = useState({...item});
-  const [tab, setTab]   = useState('info');
+  const [tab, setTab]   = useState(initialTab);
   const [noteSearch, setNoteSearch] = useState('');
   const [noteType, setNoteType]     = useState('text');
   const [noteText, setNoteText]     = useState('');
@@ -1557,20 +1572,18 @@ function DetailModal({ item, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box detail" onClick={e=>e.stopPropagation()}>
 
-        {/* Hero cover */}
-        <div className="dm-hero">
-          {data.cover
-            ? <img src={data.cover} alt="" className="dm-hero-img"/>
-            : <div className="dm-hero-ph">{TYPES[data.type]?.emoji||'📦'}</div>
-          }
-          <button className="dm-close" onClick={onClose}>×</button>
-          <button className="dm-cover-edit" onClick={()=>coverFileRef.current?.click()}>📷</button>
-          <input ref={coverFileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleCoverFile}/>
-          <div className="dm-hero-foot">
+        {/* Top bar */}
+        <div className="dm-topbar">
+          <div className="dm-badges">
             <span className="dm-type-badge">{TYPES[data.type]?.name}</span>
             <span className={`dm-status-badge dm-status-${data.status||'want'}`}>
               {STATUS[data.type]?.[data.status]||data.status}
             </span>
+          </div>
+          <div className="dm-topbar-actions">
+            <button className="dm-cover-btn" onClick={()=>coverFileRef.current?.click()}>📷</button>
+            <input ref={coverFileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleCoverFile}/>
+            <button className="dm-close" onClick={onClose}>×</button>
           </div>
         </div>
 
@@ -1592,6 +1605,7 @@ function DetailModal({ item, onClose }) {
                 placeholder="제목"/>
 
               <div className="nprop-row">
+                <span className="nprop-icon"><Circle size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">상태</span>
                 <select className="nprop-select" value={data.status||'want'} onChange={e=>changeStatus(e.target.value)}>
                   {Object.entries(STATUS[data.type]||{}).map(([k,v])=><option key={k} value={k}>{v}</option>)}
@@ -1599,6 +1613,7 @@ function DetailModal({ item, onClose }) {
               </div>
 
               <div className="nprop-row nprop-tags-row">
+                <span className="nprop-icon"><Tag size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">태그</span>
                 <div className="nprop-tags-val">
                   {(data.tags||[]).map(t=>(
@@ -1613,11 +1628,13 @@ function DetailModal({ item, onClose }) {
               </div>
 
               <div className="nprop-row nprop-star-row">
+                <span className="nprop-icon"><Star size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">별점</span>
                 <StarInput value={data.rating||0} onChange={v=>setData({...data,rating:v})}/>
               </div>
 
               <div className="nprop-row">
+                <span className="nprop-icon"><Calendar size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">날짜</span>
                 <div className="nprop-dates">
                   <input type="date" className="nprop-date-input"
@@ -1631,6 +1648,7 @@ function DetailModal({ item, onClose }) {
               </div>
 
               <div className="nprop-row nprop-progress-row">
+                <span className="nprop-icon"><BarChart2 size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">진행률</span>
                 <div className="nprop-progress-val">
                   <div className="progress-input-row">
@@ -1655,6 +1673,7 @@ function DetailModal({ item, onClose }) {
               </div>
 
               <div className="nprop-row">
+                <span className="nprop-icon"><Repeat2 size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">{REPLAY_LABEL[data.type]||'반복'}</span>
                 <div className="replay-row">
                   <button className="replay-btn" onClick={()=>setData({...data,replayCount:Math.max(0,(data.replayCount||0)-1)})}>−</button>
@@ -1666,25 +1685,30 @@ function DetailModal({ item, onClose }) {
 
               {data.type==='video' && (
                 <div className="nprop-row">
+                  <span className="nprop-icon"><Film size={14} strokeWidth={1.8}/></span>
                   <span className="nprop-key">감독</span>
                   <input type="text" className="nprop-input" value={data.director||''} onChange={e=>setData({...data,director:e.target.value})}/>
                 </div>
               )}
               {(data.type==='book'||data.type==='novel'||data.type==='comic') && (
                 <div className="nprop-row">
+                  <span className="nprop-icon"><PenLine size={14} strokeWidth={1.8}/></span>
                   <span className="nprop-key">작가</span>
                   <input type="text" className="nprop-input" value={data.author||''} onChange={e=>setData({...data,author:e.target.value})}/>
                 </div>
               )}
               <div className="nprop-row">
+                <span className="nprop-icon"><Layers size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">장르</span>
                 <input type="text" className="nprop-input" value={data.genre||''} onChange={e=>setData({...data,genre:e.target.value})}/>
               </div>
               <div className="nprop-row">
+                <span className="nprop-icon"><Wallet size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">가격</span>
                 <input type="number" className="nprop-input" value={data.price||''} onChange={e=>setData({...data,price:e.target.value})} placeholder="원"/>
               </div>
               <div className="nprop-row">
+                <span className="nprop-icon"><MessageSquare size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">한줄평</span>
                 <input type="text" className="nprop-input" value={data.oneliner||''} onChange={e=>setData({...data,oneliner:e.target.value})} placeholder="한 줄로 남겨요"/>
               </div>
