@@ -840,12 +840,28 @@ label { font-size: 13px !important; }
   /* FAB */
   .fab { bottom: 24px; right: 24px; }
 
-  /* Home: scrollable */
-  .home { height: auto; min-height: calc(100vh - 32px); }
-  .home-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  /* Home: 3-column grid, centered */
+  .home { height: auto; min-height: calc(100vh - 32px); max-width: 860px; margin: 0 auto; }
+  .home-grid { grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 0 24px 24px; }
+  .home-header { padding: 32px 24px 20px; }
 
-  /* Calendar: full height without bottom tab offset */
-  .cal-page { height: calc(100dvh - 24px); padding: 12px 16px 0; }
+  /* Calendar: fit full viewport, centered */
+  .cal-page {
+    height: calc(100dvh - 24px); padding: 16px 24px 0;
+    max-width: 740px; margin: 0 auto;
+  }
+  .cal-cell {
+    aspect-ratio: auto;
+    height: clamp(70px, calc((100dvh - 210px) / 6), 120px);
+  }
+
+  /* Game calendar (gcal): centered */
+  .gcal { max-width: 660px; margin: 0 auto; }
+
+  /* Library: Notion style, max-width centered */
+  .category, .game-view { max-width: 980px; margin: 0 auto; }
+  .lib-title { font-size: 26px; }
+  .lib-header { padding: 16px 20px 4px; }
 
   /* Library grids */
   .grid { grid-template-columns: repeat(4, 1fr); }
@@ -868,7 +884,8 @@ label { font-size: 13px !important; }
 @media (min-width: 1200px) {
   .app { padding-left: 260px; }
   .tabs { width: 260px; max-width: 260px; }
-  .home-grid { grid-template-columns: repeat(4, 1fr); }
+  /* Home stays 3 columns even on large screens */
+  .home-grid { grid-template-columns: repeat(3, 1fr); }
   .grid { grid-template-columns: repeat(5, 1fr); }
   .status-grid { grid-template-columns: repeat(5, 1fr); }
   .sov-wrap { grid-template-columns: repeat(4, 1fr); }
