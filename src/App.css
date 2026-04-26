@@ -858,9 +858,8 @@ label { font-size: 13px !important; }
   /* Game calendar (gcal): centered */
   .gcal { max-width: 660px; margin: 0 auto; }
 
-  /* Library: Notion style, max-width centered */
+  /* Library: max-width centered */
   .category, .game-view { max-width: 980px; margin: 0 auto; }
-  .lib-title { font-size: 26px; }
   .lib-header { padding: 16px 20px 4px; }
 
   /* Library grids */
