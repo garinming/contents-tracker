@@ -680,6 +680,16 @@ label { font-size: 13px !important; }
 .status-pill.want { background: rgba(255,107,157,.15); color: var(--accent); }
 .status-pill.want.active { border-color: var(--accent); }
 
+/* ── STATUS POPUP ── */
+.status-pill-wrap { position: relative; flex: 1; }
+.status-pill-popup {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  background: var(--surface); border-radius: var(--r-md);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.14); border: 1px solid var(--border);
+  padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 30;
+}
+.status-backdrop { position: fixed; inset: 0; z-index: 29; }
+
 /* ── TAG COLOR DOT ── */
 .tag-color-dot {
   width: 8px; height: 8px; border-radius: 50%; border: none; cursor: pointer;
@@ -757,6 +767,7 @@ label { font-size: 13px !important; }
   width: 100%; border: none; background: none; padding: 8px 0 16px;
   font-size: 36px !important; font-weight: 800; color: var(--text); outline: none; line-height: 1.2;
   -webkit-appearance: none; appearance: none; box-shadow: none;
+  resize: none; overflow: hidden; display: block; word-break: break-word;
 }
 .notion-title-input::placeholder { color: #C0C0C0; }
 .nprop-row {
@@ -798,8 +809,9 @@ label { font-size: 13px !important; }
   background: none !important;
   font-size: 14px !important;
 }
-/* 제목 input은 크게 유지, iOS 배경/테두리 강제 제거 */
-.notion-props input.notion-title-input {
+/* 제목 input/textarea는 크게 유지, iOS 배경/테두리 강제 제거 */
+.notion-props input.notion-title-input,
+.notion-props textarea.notion-title-input {
   font-size: 36px !important;
   background: none !important;
   border: none !important;
@@ -943,7 +955,10 @@ label { font-size: 13px !important; }
   /* Modals → centered dialog */
   .modal-overlay { align-items: center; }
   .modal-box { border-radius: var(--r-lg); max-width: 580px; width: 90%; }
-  .modal-box.detail { height: 85vh; max-height: 85vh; border-radius: var(--r-lg); }
+  .modal-box.detail { height: 85vh; max-height: 85vh; border-radius: var(--r-lg); max-width: 740px; }
+  .modal-box.detail .dm-topbar { padding: 20px 52px 12px; }
+  .modal-box.detail .dm-tabs   { padding: 0 52px; }
+  .modal-box.detail .modal-body { padding: 16px 52px 88px; }
 
   /* Todo prompt → centered */
   .todo-prompt-overlay { align-items: center; }

@@ -1502,6 +1502,15 @@ function DetailModal({ item, initialTab='info', onClose }) {
   const [notePreview, setNotePreview] = useState(null);
   const [newTag, setNewTag]         = useState('');
   const coverFileRef = useRef(null);
+  const titleRef = useRef(null);
+  const [statusOpen, setStatusOpen] = useState(false);
+
+  useEffect(()=>{
+    if(titleRef.current){
+      titleRef.current.style.height='auto';
+      titleRef.current.style.height=titleRef.current.scrollHeight+'px';
+    }
+  }, [data.title]);
 
   const update=async()=>{ onClose(); updateDoc(doc(db,'items',item.id),data); };
   const remove=async()=>{ if(window.confirm('삭제?')){ onClose(); deleteDoc(doc(db,'items',item.id)); } };
@@ -1616,9 +1625,9 @@ function DetailModal({ item, initialTab='info', onClose }) {
 
           {tab==='info'&&(
             <div className="notion-props">
-              <input type="text" className="notion-title-input"
+              <textarea ref={titleRef} className="notion-title-input"
                 value={data.title||''} onChange={e=>setData({...data,title:e.target.value})}
-                placeholder="제목"/>
+                placeholder="제목" rows={1}/>
 
               {(data.type==='book'||data.type==='novel'||data.type==='comic') && (
                 <div className="nprop-row">
@@ -1644,12 +1653,21 @@ function DetailModal({ item, initialTab='info', onClose }) {
               <div className="nprop-row">
                 <span className="nprop-icon"><Circle size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">상태</span>
-                <div className="status-pills">
-                  {Object.entries(STATUS[data.type]||{}).map(([k])=>(
-                    <button key={k} className={`status-pill ${k}${(data.status||'want')===k?' active':''}`} onClick={()=>changeStatus(k)}>
-                      {STATUS_KO[k]||k}
-                    </button>
-                  ))}
+                <div className="status-pill-wrap">
+                  {statusOpen && <div className="status-backdrop" onClick={()=>setStatusOpen(false)}/>}
+                  <button className={`status-pill ${data.status||'want'} active`} onClick={()=>setStatusOpen(o=>!o)}>
+                    {STATUS_KO[data.status||'want']}
+                  </button>
+                  {statusOpen && (
+                    <div className="status-pill-popup">
+                      {Object.entries(STATUS[data.type]||{}).map(([k])=>(
+                        <button key={k} className={`status-pill ${k}${(data.status||'want')===k?' active':''}`}
+                          onClick={()=>{changeStatus(k);setStatusOpen(false);}}>
+                          {STATUS_KO[k]||k}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
