@@ -1583,6 +1583,9 @@ function DetailModal({ item, initialTab='info', onClose }) {
           <div className="dm-topbar-actions">
             <button className="dm-cover-btn" onClick={()=>coverFileRef.current?.click()}>📷</button>
             <input ref={coverFileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleCoverFile}/>
+            <button onClick={remove} className="dm-action-danger">삭제</button>
+            <button onClick={onClose} className="dm-action-ghost">취소</button>
+            <button onClick={update} className="dm-action-primary">저장</button>
             <button className="dm-close" onClick={onClose}>×</button>
           </div>
         </div>
@@ -1712,6 +1715,12 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 <span className="nprop-key">한줄평</span>
                 <input type="text" className="nprop-input" value={data.oneliner||''} onChange={e=>setData({...data,oneliner:e.target.value})} placeholder="한 줄로 남겨요"/>
               </div>
+
+              {data.cover && (
+                <div className="detail-cover-bottom">
+                  <img src={data.cover} alt="cover" className="detail-cover-img"/>
+                </div>
+              )}
             </div>
           )}
 
@@ -1774,13 +1783,6 @@ function DetailModal({ item, initialTab='info', onClose }) {
             </div>
           )}
 
-        </div>
-        <div className="modal-footer">
-          <button onClick={remove} className="btn-danger">삭제</button>
-          <div>
-            <button onClick={onClose} className="btn-ghost">취소</button>
-            <button onClick={update} className="btn-primary">저장</button>
-          </div>
         </div>
       </div>
     </div>
