@@ -1583,18 +1583,15 @@ function DetailModal({ item, initialTab='info', onClose }) {
           <div className="dm-topbar-actions">
             <button className="dm-cover-btn" onClick={()=>coverFileRef.current?.click()}>📷</button>
             <input ref={coverFileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleCoverFile}/>
-            <button onClick={remove} className="dm-action-danger">삭제</button>
-            <button onClick={onClose} className="dm-action-ghost">취소</button>
-            <button onClick={update} className="dm-action-primary">저장</button>
             <button className="dm-close" onClick={onClose}>×</button>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs: 정보, 메모 */}
         <div className="dm-tabs">
-          {['info','notes','review'].map((t,i)=>(
+          {['info','notes'].map((t,i)=>(
             <button key={t} className={`dm-tab${tab===t?' active':''}`} onClick={()=>setTab(t)}>
-              {['정보','메모','리뷰'][i]}
+              {['정보','메모'][i]}
             </button>
           ))}
         </div>
@@ -1606,6 +1603,27 @@ function DetailModal({ item, initialTab='info', onClose }) {
               <input type="text" className="notion-title-input"
                 value={data.title||''} onChange={e=>setData({...data,title:e.target.value})}
                 placeholder="제목"/>
+
+              {(data.type==='book'||data.type==='novel'||data.type==='comic') && (
+                <div className="nprop-row">
+                  <span className="nprop-icon"><PenLine size={14} strokeWidth={1.8}/></span>
+                  <span className="nprop-key">작가</span>
+                  <input type="text" className="nprop-input" value={data.author||''} onChange={e=>setData({...data,author:e.target.value})}/>
+                </div>
+              )}
+              {data.type==='video' && (
+                <div className="nprop-row">
+                  <span className="nprop-icon"><Film size={14} strokeWidth={1.8}/></span>
+                  <span className="nprop-key">감독</span>
+                  <input type="text" className="nprop-input" value={data.director||''} onChange={e=>setData({...data,director:e.target.value})}/>
+                </div>
+              )}
+
+              <div className="nprop-row nprop-star-row">
+                <span className="nprop-icon"><Star size={14} strokeWidth={1.8}/></span>
+                <span className="nprop-key">별점</span>
+                <StarInput value={data.rating||0} onChange={v=>setData({...data,rating:v})}/>
+              </div>
 
               <div className="nprop-row">
                 <span className="nprop-icon"><Circle size={14} strokeWidth={1.8}/></span>
@@ -1630,10 +1648,10 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 </div>
               </div>
 
-              <div className="nprop-row nprop-star-row">
-                <span className="nprop-icon"><Star size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">별점</span>
-                <StarInput value={data.rating||0} onChange={v=>setData({...data,rating:v})}/>
+              <div className="nprop-row">
+                <span className="nprop-icon"><MessageSquare size={14} strokeWidth={1.8}/></span>
+                <span className="nprop-key">한줄평</span>
+                <input type="text" className="nprop-input" value={data.oneliner||''} onChange={e=>setData({...data,oneliner:e.target.value})} placeholder="한 줄로 남겨요"/>
               </div>
 
               <div className="nprop-row">
@@ -1650,34 +1668,9 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 </div>
               </div>
 
-              <div className="nprop-row nprop-progress-row">
-                <span className="nprop-icon"><BarChart2 size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">진행률</span>
-                <div className="nprop-progress-val">
-                  <div className="progress-input-row">
-                    <input type="number" min="0" placeholder="현재"
-                      value={data.progressCurrent||''}
-                      onChange={e=>setData({...data,progressCurrent:e.target.value})}
-                      className="progress-num-input"/>
-                    <span className="progress-slash">/</span>
-                    <input type="number" min="0" placeholder="총"
-                      value={data.progressTotal||''}
-                      onChange={e=>setData({...data,progressTotal:e.target.value})}
-                      className="progress-num-input"/>
-                    <span className="progress-unit">{PROGRESS_UNIT[data.type]||''}</span>
-                  </div>
-                  {pct!==null && (
-                    <div className="progress-bar-wrap" style={{marginTop:6}}>
-                      <div className="progress-bar-fill" style={{width:`${pct}%`}}/>
-                      <span className="progress-pct">{pct}%</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div className="nprop-row">
                 <span className="nprop-icon"><Repeat2 size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">{REPLAY_LABEL[data.type]||'반복'}</span>
+                <span className="nprop-key nprop-key-replay">{REPLAY_LABEL[data.type]||'반복'}</span>
                 <div className="replay-row">
                   <button className="replay-btn" onClick={()=>setData({...data,replayCount:Math.max(0,(data.replayCount||0)-1)})}>−</button>
                   <span className="replay-count">{data.replayCount||0}</span>
@@ -1686,34 +1679,10 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 </div>
               </div>
 
-              {data.type==='video' && (
-                <div className="nprop-row">
-                  <span className="nprop-icon"><Film size={14} strokeWidth={1.8}/></span>
-                  <span className="nprop-key">감독</span>
-                  <input type="text" className="nprop-input" value={data.director||''} onChange={e=>setData({...data,director:e.target.value})}/>
-                </div>
-              )}
-              {(data.type==='book'||data.type==='novel'||data.type==='comic') && (
-                <div className="nprop-row">
-                  <span className="nprop-icon"><PenLine size={14} strokeWidth={1.8}/></span>
-                  <span className="nprop-key">작가</span>
-                  <input type="text" className="nprop-input" value={data.author||''} onChange={e=>setData({...data,author:e.target.value})}/>
-                </div>
-              )}
-              <div className="nprop-row">
-                <span className="nprop-icon"><Layers size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">장르</span>
-                <input type="text" className="nprop-input" value={data.genre||''} onChange={e=>setData({...data,genre:e.target.value})}/>
-              </div>
               <div className="nprop-row">
                 <span className="nprop-icon"><Wallet size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">가격</span>
                 <input type="number" className="nprop-input" value={data.price||''} onChange={e=>setData({...data,price:e.target.value})} placeholder="원"/>
-              </div>
-              <div className="nprop-row">
-                <span className="nprop-icon"><MessageSquare size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">한줄평</span>
-                <input type="text" className="nprop-input" value={data.oneliner||''} onChange={e=>setData({...data,oneliner:e.target.value})} placeholder="한 줄로 남겨요"/>
               </div>
 
               {data.cover && (
@@ -1721,6 +1690,13 @@ function DetailModal({ item, initialTab='info', onClose }) {
                   <img src={data.cover} alt="cover" className="detail-cover-img"/>
                 </div>
               )}
+
+              <div className="detail-review-section">
+                <textarea className="detail-inline-review"
+                  placeholder="리뷰를 남겨보세요..."
+                  value={data.review||''}
+                  onChange={e=>setData({...data,review:e.target.value})}/>
+              </div>
             </div>
           )}
 
@@ -1772,18 +1748,14 @@ function DetailModal({ item, initialTab='info', onClose }) {
             </>
           )}
 
-          {tab==='review'&&(
-            <div className="review-tab-content">
-              <textarea className="review-textarea"
-                placeholder="리뷰를 남겨보세요..."
-                value={data.review||''}
-                onChange={e=>setData({...data,review:e.target.value})}
-                rows="10"/>
-              <p className="review-hint">저장 후 Activity 탭 리뷰에서 확인됩니다</p>
-            </div>
-          )}
-
         </div>
+
+        {/* Floating save/delete */}
+        <div className="detail-float-actions">
+          <button onClick={remove} className="detail-float-danger">삭제</button>
+          <button onClick={update} className="detail-float-primary">저장</button>
+        </div>
+
       </div>
     </div>
   );
