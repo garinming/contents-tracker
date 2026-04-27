@@ -31,6 +31,7 @@ const STATUS_COLORS = {
 const ACCENT_COLORS = [
   '#FF6B9D','#4A90E2','#9B59B6','#27AE60','#F5A623','#FF6B6B'
 ];
+const TAG_COLORS = ['#FF6B9D','#4A90E2','#9B59B6','#27AE60','#F5A623','#FF6B6B','#00BCD4','#AEAEB2'];
 const EVENT_COLORS = ['#FF6B9D','#4A90E2','#FF9F43','#27AE60','#9B59B6','#FF6B6B'];
 const FONTS = [
   { name: '기본',          value: 'system',     family: `-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif` },
@@ -1522,6 +1523,21 @@ function DetailModal({ item, initialTab='info', onClose }) {
     setData({...data,...up});
   };
 
+  const STATUS_KO = { want:'위시', ing:'진행중', yet:'미정', done:'완료' };
+
+  const tagStyle = color => {
+    if (!color) return {};
+    const r=parseInt(color.slice(1,3),16), g=parseInt(color.slice(3,5),16), b=parseInt(color.slice(5,7),16);
+    return { background:`rgba(${r},${g},${b},.13)`, color };
+  };
+
+  const cycleTagColor = t => {
+    const cur = (data.tagColors||{})[t];
+    const idx = cur ? TAG_COLORS.indexOf(cur) : -1;
+    const next = TAG_COLORS[(idx+1)%TAG_COLORS.length];
+    setData({...data, tagColors:{...(data.tagColors||{}),[t]:next}});
+  };
+
   const addTag=()=>{
     if(!newTag.trim())return;
     const tags=data.tags||[];
@@ -1628,20 +1644,29 @@ function DetailModal({ item, initialTab='info', onClose }) {
               <div className="nprop-row">
                 <span className="nprop-icon"><Circle size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">상태</span>
-                <select className="nprop-select" value={data.status||'want'} onChange={e=>changeStatus(e.target.value)}>
-                  {Object.entries(STATUS[data.type]||{}).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-                </select>
+                <div className="status-pills">
+                  {Object.entries(STATUS[data.type]||{}).map(([k])=>(
+                    <button key={k} className={`status-pill ${k}${(data.status||'want')===k?' active':''}`} onClick={()=>changeStatus(k)}>
+                      {STATUS_KO[k]||k}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="nprop-row nprop-tags-row">
                 <span className="nprop-icon"><Tag size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">태그</span>
                 <div className="nprop-tags-val">
-                  {(data.tags||[]).map(t=>(
-                    <span key={t} className="tag">#{t}
-                      <button onClick={()=>setData({...data,tags:(data.tags||[]).filter(x=>x!==t)})}>×</button>
-                    </span>
-                  ))}
+                  {(data.tags||[]).map(t=>{
+                    const color=(data.tagColors||{})[t];
+                    return (
+                      <span key={t} className="tag" style={tagStyle(color)}>
+                        <button className="tag-color-dot" style={{background:color||'var(--accent)'}} onClick={()=>cycleTagColor(t)}/>
+                        #{t}
+                        <button className="tag-x" onClick={()=>setData({...data,tags:(data.tags||[]).filter(x=>x!==t)})}>×</button>
+                      </span>
+                    );
+                  })}
                   <input type="text" className="nprop-tag-input" placeholder="+" value={newTag}
                     onChange={e=>setNewTag(e.target.value)}
                     onKeyPress={e=>e.key==='Enter'&&addTag()}/>
