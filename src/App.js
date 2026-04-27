@@ -2,10 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { CUSTOM_FONTS } from './customFonts';
 import { Calendar, Tag, Star, BarChart2, Repeat2, Film, PenLine, Layers, Wallet, MessageSquare, Circle } from 'lucide-react';
-import { db, storage } from './firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { auth, db, storage } from './firebase';
+import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as fbSignOut, sendPasswordResetEmail } from 'firebase/auth';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDoc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import './App.css';
+
+const UserCtx = React.createContext({ uid:'', logout:()=>{} });
 
 const TYPES = {
   game:  { name: 'Games',   emoji: '🎮' },
@@ -111,7 +114,152 @@ async function searchAPI(query, type) {
   } catch(e){ console.error(e); return []; }
 }
 
+/* ── LEGACY MIGRATION ── */
+async function migrateLegacyItems(uid) {
+  const flag = 'migrated_' + uid;
+  if (localStorage.getItem(flag)) return;
+  try {
+    const batch = writeBatch(db);
+    let count = 0;
+    for (const col of ['items','gameEvents','todos']) {
+      const sn = await getDocs(collection(db, col));
+      sn.forEach(d => {
+        if (!d.data().userId) { batch.update(doc(db,col,d.id), {userId:uid}); count++; }
+      });
+    }
+    if (count > 0) await batch.commit();
+    localStorage.setItem(flag, '1');
+  } catch(e) { console.error('Migration error:', e); }
+}
+
+/* ── AUTH SCREEN ── */
+function AuthScreen() {
+  const [isSignup, setIsSignup] = useState(false);
+  const [isReset,  setIsReset]  = useState(false);
+  const [uname, setUname] = useState('');
+  const [pw,    setPw]    = useState('');
+  const [email, setEmail] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok,  setOk]  = useState('');
+  const clr = () => { setErr(''); setOk(''); };
+
+  const doLogin = async () => {
+    if (!uname.trim() || !pw) return setErr('아이디와 비밀번호를 입력하세요');
+    setLoading(true); clr();
+    try {
+      const snap = await getDoc(doc(db,'usernames', uname.trim().toLowerCase()));
+      if (!snap.exists()) { setErr('존재하지 않는 아이디입니다'); return; }
+      await signInWithEmailAndPassword(auth, snap.data().authEmail, pw);
+      localStorage.setItem('authUser', uname.trim().toLowerCase());
+    } catch(e) {
+      setErr(['auth/wrong-password','auth/invalid-credential'].includes(e.code) ? '비밀번호가 틀렸습니다' : '로그인 실패');
+    } finally { setLoading(false); }
+  };
+
+  const doSignup = async () => {
+    const n = uname.trim().toLowerCase();
+    if (!n || !pw) return setErr('아이디와 비밀번호를 입력하세요');
+    if (n.length < 2) return setErr('아이디는 2자 이상이어야 합니다');
+    if (pw.length < 6) return setErr('비밀번호는 6자 이상이어야 합니다');
+    if (email && !/\S+@\S+\.\S+/.test(email)) return setErr('이메일 형식이 올바르지 않습니다');
+    setLoading(true); clr();
+    try {
+      const ex = await getDoc(doc(db,'usernames', n));
+      if (ex.exists()) { setErr('이미 사용 중인 아이디입니다'); return; }
+      const authEmail = email.trim() || `${n}@helo.app`;
+      const cred = await createUserWithEmailAndPassword(auth, authEmail, pw);
+      await setDoc(doc(db,'usernames', n), { uid:cred.user.uid, authEmail, hasEmail:!!email.trim(), createdAt:new Date() });
+      localStorage.setItem('authUser', n);
+    } catch(e) {
+      setErr(e.code==='auth/email-already-in-use' ? '이미 사용 중인 이메일입니다' : '가입 실패: '+e.message);
+    } finally { setLoading(false); }
+  };
+
+  const doReset = async () => {
+    if (!uname.trim()) return setErr('아이디를 입력하세요');
+    setLoading(true); clr();
+    try {
+      const snap = await getDoc(doc(db,'usernames', uname.trim().toLowerCase()));
+      if (!snap.exists()) { setErr('존재하지 않는 아이디입니다'); return; }
+      const d = snap.data();
+      if (!d.hasEmail) { setErr('이메일이 등록되지 않은 계정입니다. 비밀번호를 재설정할 수 없어요.'); return; }
+      await sendPasswordResetEmail(auth, d.authEmail);
+      setOk('비밀번호 재설정 이메일을 발송했습니다');
+    } catch(e) { setErr('실패: '+e.message); }
+    finally { setLoading(false); }
+  };
+
+  const onKey = (e, fn) => { if(e.key==='Enter') fn(); };
+
+  return (
+    <div className="auth-overlay">
+      <div className="auth-card">
+        <div className="auth-logo">🎬</div>
+        <h2 className="auth-title">내 컬렉션</h2>
+        <p className="auth-sub">{isReset?'비밀번호 재설정':isSignup?'새 계정 만들기':'로그인'}</p>
+        {err && <div className="auth-error">{err}</div>}
+        {ok  && <div className="auth-ok">{ok}</div>}
+
+        <div className="auth-field">
+          <label className="auth-label">아이디</label>
+          <input className="auth-input" value={uname} autoCapitalize="none" autoCorrect="off"
+            placeholder="아이디"
+            onChange={e=>{setUname(e.target.value);clr();}}
+            onKeyPress={e=>onKey(e, isReset?doReset:isSignup?doSignup:doLogin)}/>
+        </div>
+
+        {!isReset && (
+          <div className="auth-field">
+            <label className="auth-label">비밀번호</label>
+            <div className="auth-pw-wrap">
+              <input className="auth-input" type={showPw?'text':'password'} value={pw}
+                placeholder={isSignup?'비밀번호 (6자 이상)':'비밀번호'}
+                onChange={e=>{setPw(e.target.value);clr();}}
+                onKeyPress={e=>onKey(e, isSignup?doSignup:doLogin)}/>
+              <button className="auth-eye" type="button" onClick={()=>setShowPw(v=>!v)}>{showPw?'🙈':'👁'}</button>
+            </div>
+            {!isSignup && (
+              <div className="auth-forgot">
+                <button type="button" onClick={()=>{setIsReset(true);clr();}}>비밀번호 찾기</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isSignup && (
+          <div className="auth-field">
+            <label className="auth-label">이메일 <span className="auth-optional">(선택 · 비밀번호 찾기에 필요)</span></label>
+            <input className="auth-input" type="email" value={email}
+              placeholder="이메일 (선택사항)"
+              onChange={e=>{setEmail(e.target.value);clr();}}/>
+          </div>
+        )}
+
+        <button className="auth-btn" disabled={loading}
+          onClick={isReset?doReset:isSignup?doSignup:doLogin}>
+          {loading?'처리 중…':isReset?'재설정 메일 발송':isSignup?'가입하기':'로그인'}
+        </button>
+
+        <div className="auth-switch">
+          {isReset ? (
+            <button type="button" onClick={()=>{setIsReset(false);clr();}}>← 로그인으로</button>
+          ) : isSignup ? (
+            <>이미 계정이 있나요?&nbsp;<button type="button" onClick={()=>{setIsSignup(false);clr();}}>로그인</button></>
+          ) : (
+            <>계정이 없나요?&nbsp;<button type="button" onClick={()=>{setIsSignup(true);clr();}}>회원가입</button></>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authReady,   setAuthReady]   = useState(false);
+
   const [view, setView]         = useState('home');
   const [type, setType]         = useState(null);
   const [gameTab, setGameTab]   = useState('main');
@@ -190,14 +338,33 @@ export default function App() {
   useEffect(()=>{ localStorage.setItem('goals', JSON.stringify(goals)); },[goals]);
   useEffect(()=>{ localStorage.setItem('savedFilters', JSON.stringify(savedFilters)); },[savedFilters]);
 
+  // Auth state listener
   useEffect(()=>{
-    const u1 = onSnapshot(collection(db,'items'), snap=>{
+    const unsub = onAuthStateChanged(auth, async user => {
+      setCurrentUser(user);
+      setAuthReady(true);
+      if (user) {
+        const u = localStorage.getItem('authUser') || '';
+        if (u) await migrateLegacyItems(user.uid);
+      }
+    });
+    return unsub;
+  },[]);
+
+  // Data listeners — only run when logged in
+  useEffect(()=>{
+    if (!currentUser) return;
+    const uid = currentUser.uid;
+    const q1 = query(collection(db,'items'), where('userId','==',uid));
+    const u1 = onSnapshot(q1, snap=>{
       const d=[]; snap.forEach(x=>d.push({id:x.id,...x.data()})); setItems(d);
     });
-    const u2 = onSnapshot(collection(db,'gameEvents'), snap=>{
+    const q2 = query(collection(db,'gameEvents'), where('userId','==',uid));
+    const u2 = onSnapshot(q2, snap=>{
       const d=[]; snap.forEach(x=>d.push({id:x.id,...x.data()})); setGameEvents(d);
     });
-    const u3 = onSnapshot(collection(db,'todos'), snap=>{
+    const q3 = query(collection(db,'todos'), where('userId','==',uid));
+    const u3 = onSnapshot(q3, snap=>{
       const d=[]; snap.forEach(x=>d.push({id:x.id,...x.data()}));
       setTodos(d.sort((a,b)=>{
         const ad=toMs(a.dueDate), bd=toMs(b.dueDate);
@@ -207,7 +374,7 @@ export default function App() {
       }));
     });
     return ()=>{ u1(); u2(); u3(); };
-  },[]);
+  },[currentUser]);
 
   const filtered = items.filter(item=>{
     if (view==='wishlist') return (item.status||'want')==='want';
@@ -235,7 +402,18 @@ export default function App() {
     onSort:(by)=>{ if(sortBy===by)setSortDir(d=>d==='asc'?'desc':'asc'); else{setSortBy(by);setSortDir('desc');} }
   };
 
+  const handleLogout = async () => {
+    await fbSignOut(auth);
+    localStorage.removeItem('authUser');
+    setCurrentUser(null);
+    setItems([]); setGameEvents([]); setTodos([]);
+  };
+
+  if (!authReady) return <div className="auth-overlay"><div className="auth-card" style={{textAlign:'center',padding:40}}>로딩 중…</div></div>;
+  if (!currentUser) return <AuthScreen />;
+
   return (
+    <UserCtx.Provider value={{ uid: currentUser.uid, logout: handleLogout }}>
     <div className="app">
       <div className="content">
         {view==='home' && <Home items={items} username={username} goals={goals} onSelect={t=>{ setType(t); setGameTab('main'); setView('cat'); }} />}
@@ -319,6 +497,7 @@ export default function App() {
         />
       )}
     </div>
+    </UserCtx.Provider>
   );
 }
 
@@ -645,6 +824,7 @@ function WeekRow({ week, events, today, selected, onDayClick }) {
 }
 
 function AddEventModal({ event, date, onClose }) {
+  const { uid } = React.useContext(UserCtx);
   const [title, setTitle]   = useState(event?.title||'');
   const [desc, setDesc]     = useState(event?.description||'');
   const [color, setColor]   = useState(event?.color||EVENT_COLORS[0]);
@@ -663,7 +843,7 @@ function AddEventModal({ event, date, onClose }) {
       endDate:   endDate   ? new Date(endDate)   : new Date(startDate||Date.now()),
     };
     if(event) await updateDoc(doc(db,'gameEvents',event.id), payload);
-    else await addDoc(collection(db,'gameEvents'), {...payload, createdAt:new Date()});
+    else await addDoc(collection(db,'gameEvents'), {...payload, createdAt:new Date(), userId:uid});
     onClose();
   };
 
@@ -706,6 +886,7 @@ function AddEventModal({ event, date, onClose }) {
 
 /* ── GAME TODO ── */
 function GameTodo({ todos }) {
+  const { uid } = React.useContext(UserCtx);
   const [input, setInput]         = useState('');
   const [pendingText, setPending] = useState(null);
   const [dueDate, setDueDate]     = useState('');
@@ -720,7 +901,7 @@ function GameTodo({ todos }) {
     try {
       await addDoc(collection(db,'todos'), {
         text: pendingText, done:false, createdAt:new Date(),
-        dueDate: (!skip && dueDate) ? new Date(dueDate) : null
+        dueDate: (!skip && dueDate) ? new Date(dueDate) : null, userId:uid,
       });
       setPending(null); setDueDate('');
     } catch(e) { alert('추가 실패: '+e.message); }
@@ -1292,6 +1473,8 @@ function CustomFontPicker({ font, onFont }) {
 
 /* ── SETTINGS ── */
 function Settings({ accentColor, font, username, onAccentColor, onFont, onUsername, items, goals, onGoalSet }) {
+  const { uid, logout } = React.useContext(UserCtx);
+  const authUsername = localStorage.getItem('authUser') || '';
   const fileRef = useRef();
   const handleExport = () => {
     const rows = items.map(i=>({
@@ -1322,7 +1505,7 @@ function Settings({ accentColor, font, username, onAccentColor, onFont, onUserna
             rating:Number(row['별점'])||0, genre:String(row['장르']||''),
             author:String(row['작가감독']||''), director:'', price:String(row['가격']||''),
             review:String(row['리뷰']||''), tags:row['태그']?String(row['태그']).split(',').map(t=>t.trim()).filter(Boolean):[],
-            cover:null, notes:[], journal:[], createdAt:new Date(),
+            cover:null, notes:[], journal:[], createdAt:new Date(), userId:uid,
           });
           count++;
         }
@@ -1395,12 +1578,20 @@ function Settings({ accentColor, font, username, onAccentColor, onFont, onUserna
         </button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} style={{display:'none'}}/>
       </div>
+      <div className="setting-card">
+        <h3>계정</h3>
+        <p style={{fontSize:13,color:'var(--sub)',marginBottom:12}}><b style={{color:'var(--text)'}}>{authUsername}</b> 로 로그인 중</p>
+        <button className="data-btn" onClick={logout} style={{borderColor:'#FF3B30'}}>
+          <span>🚪</span><div><strong style={{color:'#FF3B30'}}>로그아웃</strong><p>다른 계정으로 전환하려면 로그아웃하세요</p></div>
+        </button>
+      </div>
     </div>
   );
 }
 
 /* ── ADD MODAL ── */
 function AddModal({ type, onClose }) {
+  const { uid } = React.useContext(UserCtx);
   const [title, setTitle]     = useState('');
   const [status, setStatus]   = useState('want');
   const [file, setFile]       = useState(null);
@@ -1422,7 +1613,7 @@ function AddModal({ type, onClose }) {
     await addDoc(collection(db,'items'),{
       title:r.title, type, status, cover:r.cover||null, rating:0,
       genre:r.genre||'', author:r.author||'', director:r.director||'', year:r.year||'',
-      review:'', notes:[], journal:[], tags:[], price:'', createdAt:new Date(),
+      review:'', notes:[], journal:[], tags:[], price:'', createdAt:new Date(), userId:uid,
       ...(status==='ing'&&{startDate:new Date()}),
     });
     setSaving(false); onClose();
@@ -1435,7 +1626,7 @@ function AddModal({ type, onClose }) {
     if(file){ const sr=ref(storage,`covers/${Date.now()}_${file.name}`); await uploadBytes(sr,file); url=await getDownloadURL(sr); }
     await addDoc(collection(db,'items'),{
       title, type, status, cover:url, rating:0,
-      genre:'', author:'', director:'', review:'', notes:[], journal:[], tags:[], price:'', createdAt:new Date(),
+      genre:'', author:'', director:'', review:'', notes:[], journal:[], tags:[], price:'', createdAt:new Date(), userId:uid,
       ...(status==='ing'&&{startDate:new Date()}),
     });
     setSaving(false); onClose();

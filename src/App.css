@@ -980,3 +980,46 @@ label { font-size: 13px !important; }
 
 /* ── CUSTOM FONTS ── */
 /* Custom fonts injected via JS in App.js */
+
+/* ── AUTH SCREEN ── */
+.auth-overlay {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000; padding: 20px;
+}
+.auth-card {
+  background: var(--surface); border-radius: var(--r-lg);
+  padding: 36px 28px; width: 100%; max-width: 380px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+}
+.auth-logo { text-align: center; font-size: 40px; margin-bottom: 8px; }
+.auth-title { text-align: center; font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.auth-sub { text-align: center; font-size: 14px; color: var(--sub); margin-bottom: 24px; }
+.auth-field { margin-bottom: 14px; }
+.auth-label { display: block; font-size: 11px !important; font-weight: 700; color: var(--sub); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.auth-optional { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--sub); }
+.auth-pw-wrap { position: relative; }
+.auth-input {
+  width: 100%; padding: 13px 16px; border: 1.5px solid var(--border);
+  border-radius: var(--r-md); background: var(--bg); color: var(--text);
+  font-size: 16px !important; outline: none; transition: border-color .15s;
+  -webkit-appearance: none; box-sizing: border-box;
+}
+.auth-input:focus { border-color: var(--accent); background: var(--surface); }
+.auth-eye {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; font-size: 18px !important;
+  color: var(--sub); padding: 0; line-height: 1;
+}
+.auth-forgot { text-align: right; margin-top: 5px; }
+.auth-forgot button { background: none; border: none; color: var(--sub); font-size: 12px !important; cursor: pointer; padding: 0; text-decoration: underline; }
+.auth-error { background: rgba(255,59,48,.08); color: #FF3B30; border-radius: var(--r-sm); padding: 10px 14px; font-size: 13px !important; text-align: center; margin-bottom: 14px; }
+.auth-ok { background: rgba(46,204,113,.1); color: #27AE60; border-radius: var(--r-sm); padding: 10px 14px; font-size: 13px !important; text-align: center; margin-bottom: 14px; }
+.auth-btn {
+  width: 100%; padding: 14px; background: var(--accent); color: white;
+  border: none; border-radius: var(--r-md); font-size: 16px !important; font-weight: 700;
+  cursor: pointer; margin-top: 6px; transition: opacity .15s;
+}
+.auth-btn:disabled { opacity: .6; cursor: not-allowed; }
+.auth-switch { text-align: center; margin-top: 18px; font-size: 14px; color: var(--sub); }
+.auth-switch button { background: none; border: none; color: var(--accent); font-weight: 700; cursor: pointer; font-size: 14px !important; padding: 0; }
