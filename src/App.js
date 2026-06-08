@@ -93,18 +93,44 @@ async function searchAPI(query, type) {
         year:  (i.release_date||i.first_air_date)?.substring(0,4)
       }));
     }
-    if (type==='book'||type==='comic'||type==='novel') {
-      const url = `https://www.aladin.co.kr/ttb/api/ItemSearch.aspx?ttbkey=${API_KEYS.aladin}&Query=${encodeURIComponent(query)}&QueryType=Title&MaxResults=5&start=1&SearchTarget=Book&output=js&Version=20131101`;
-      const res  = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-      const data = await res.json();
-      return (data.item||[]).map(i=>({
-        title:  i.title.replace(/ *\([^)]*\) */g,''),
-        cover:  i.cover,
-        author: i.author,
-        year:   i.pubDate?.substring(0,4),
-        genre:  i.categoryName?.split('>')[1]?.trim()
-      }));
-    }
+  if (type==='book'||type==='comic'||type==='novel') {
+
+    const aladinUrl =
+      `https://www.aladin.co.kr/ttb/api/ItemSearch.aspx?ttbkey=${API_KEYS.aladin}&Query=${encodeURIComponent(query)}&QueryType=Title&MaxResults=5&start=1&SearchTarget=Book&output=js&Version=20131101`;
+
+    const [aladinRes, googleRes] = await Promise.all([
+      fetch(`https://corsproxy.io/?${encodeURIComponent(aladinUrl)}`),
+      fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5`)
+    ]);
+
+    const aladinData = await aladinRes.json();
+    const googleData = await googleRes.json();
+
+    const aladinBooks = (aladinData.item || []).map(i => ({
+      title: i.title.replace(/ *\([^)]*\) */g,''),
+      cover: i.cover,
+      author: i.author,
+      year: i.pubDate?.substring(0,4),
+      source: 'aladin'
+    }));
+
+    const googleBooks = (googleData.items || []).map(i => ({
+      title: i.volumeInfo?.title,
+      cover: i.volumeInfo?.imageLinks?.thumbnail,
+      author: i.volumeInfo?.authors?.join(', '),
+      year: i.volumeInfo?.publishedDate?.substring(0,4),
+      source: 'google'
+    }));
+
+    const merged = [...aladinBooks, ...googleBooks];
+
+    return merged.filter(
+      (book, index, self) =>
+        index === self.findIndex(
+          b => b.title?.toLowerCase() === book.title?.toLowerCase()
+        )
+    );
+  }
     return [];
   } catch(e){ console.error(e); return []; }
 }
