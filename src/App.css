@@ -1201,3 +1201,15 @@ label { font-size: 13px !important; }
 .diary-export-preview { display: flex; flex-direction: column; gap: 12px; background: var(--bg); }
 .diary-export-preview img { width: 100%; display: block; border-radius: 10px; box-shadow: var(--shadow); }
 .diary-export-note { font-size: 12px; color: var(--sub); text-align: center; }
+
+/* ── PULL TO REFRESH ── */
+.ptr {
+  position: fixed; top: env(safe-area-inset-top); left: 50%; z-index: 900;
+  width: 40px; height: 40px; border-radius: 50%; background: var(--surface);
+  box-shadow: 0 4px 16px rgba(0,0,0,.14); display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.ptr-icon { font-size: 22px; font-weight: 700; color: var(--sub); line-height: 1; display: inline-block; }
+.ptr-icon.ready { color: var(--accent); }
+.ptr-icon.spin { color: var(--accent); animation: ptr-spin .7s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }

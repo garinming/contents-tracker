@@ -7,6 +7,7 @@ import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndP
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDoc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import GameDiary from './GameDiary';
+import PullToRefresh from './PullToRefresh';
 import './App.css';
 
 const UserCtx = React.createContext({ uid:'', logout:()=>{} });
@@ -440,6 +441,7 @@ export default function App() {
   return (
     <UserCtx.Provider value={{ uid: currentUser.uid, logout: handleLogout }}>
     <div className="app">
+      <PullToRefresh />
       <div className="content">
         {view==='home' && <Home items={items} username={username} goals={goals} onSelect={t=>{ setType(t); setGameTab('main'); setView('cat'); }} />}
 
