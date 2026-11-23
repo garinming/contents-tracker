@@ -102,7 +102,8 @@ async function searchAPI(query, type) {
         if (parsed.errorCode) throw new Error(parsed.errorMessage || `Aladin error ${parsed.errorCode}`);
         return parsed;
       };
-      const data = await Promise.any(
+      // 알라딘(프록시 여러 개 중 먼저 성공한 것)과 Google Books를 동시에 검색
+      const aladinPromise = Promise.any(
         proxyUrls.map(proxyUrl =>
           fetch(proxyUrl)
             .then(parseBookSearch)
@@ -111,21 +112,33 @@ async function searchAPI(query, type) {
               throw err;
             })
         )
-      ).catch(err => {
+      ).then(data => {
+        const items = Array.isArray(data?.item) ? data.item : (data?.item ? [data.item] : []);
+        return items.map(i=>({
+          title:  (i.title||'').replace(/ *\([^)]*\) */g,''),
+          cover:  i.cover?.replace(/\/cover(sum|200)?\//, '/cover500/') || i.cover,
+          author: i.author,
+          year:   i.pubDate?.substring(0,4),
+          genre:  i.categoryName?.split('>')[1]?.trim()
+        }));
+      }).catch(err => {
         console.error('[BookSearch] 모든 프록시 실패 또는 데이터 없음', err);
-        return null;
-      });
-      if (!data) {
         return [];
-      }
-      const items = Array.isArray(data.item) ? data.item : (data.item ? [data.item] : []);
-      return items.map(i=>({
-        title:  (i.title||'').replace(/ *\([^)]*\) */g,''),
-        cover:  i.cover?.replace(/\/cover(sum|200)?\//, '/cover500/') || i.cover,
-        author: i.author,
-        year:   i.pubDate?.substring(0,4),
-        genre:  i.categoryName?.split('>')[1]?.trim()
-      }));
+      });
+      const googlePromise = fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5`)
+        .then(res => res.json())
+        .then(data => (data.items||[]).map(i=>({
+          title:  i.volumeInfo?.title,
+          cover:  i.volumeInfo?.imageLinks?.thumbnail?.replace(/^http:/, 'https:') || null,
+          author: i.volumeInfo?.authors?.join(', '),
+          year:   i.volumeInfo?.publishedDate?.substring(0,4),
+        })))
+        .catch(err => { console.warn('[BookSearch] Google Books 실패', err); return []; });
+      const [aladinBooks, googleBooks] = await Promise.all([aladinPromise, googlePromise]);
+      return [...aladinBooks, ...googleBooks].filter(
+        (book, index, self) => book.title &&
+          index === self.findIndex(b => b.title?.toLowerCase() === book.title?.toLowerCase())
+      );
     }
     return [];
   } catch(e){ console.error(e); return []; }
