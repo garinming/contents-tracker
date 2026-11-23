@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { CUSTOM_FONTS } from './customFonts';
-import { Calendar, Tag, Star, BarChart2, Repeat2, Film, PenLine, Layers, Wallet, MessageSquare, Circle } from 'lucide-react';
+import { Calendar, Tag, Star, Repeat2, Film, PenLine, Wallet, MessageSquare, Circle } from 'lucide-react';
 import { auth, db, storage } from './firebase';
-import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as fbSignOut, sendPasswordResetEmail } from 'firebase/auth';
+import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as fbSignOut, sendPasswordResetEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, getDoc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import GameDiary from './GameDiary';
 import './App.css';
 
 const UserCtx = React.createContext({ uid:'', logout:()=>{} });
@@ -25,12 +26,6 @@ const STATUS = {
   comic: { want: 'want', ing: 'ing', yet: 'yet', done: 'done' },
 };
 const STATUS_ORDER  = ['ing', 'yet', 'done', 'want'];
-const STATUS_COLORS = {
-  want: { bg: '#FFE8F0', dot: '#FF6B9D' },
-  ing:  { bg: '#FFF4E6', dot: '#FF9F43' },
-  yet:  { bg: '#F4F4F8', dot: '#AEAEB2' },
-  done: { bg: '#E8F8F0', dot: '#2ECC71' },
-};
 const ACCENT_COLORS = [
   '#FF6B9D','#4A90E2','#9B59B6','#27AE60','#F5A623','#FF6B6B'
 ];
@@ -62,16 +57,6 @@ function toDateStr(val) {
   if (!ms) return '';
   return new Date(ms).toISOString().split('T')[0];
 }
-function starStr(rating, max=5) {
-  if (!rating || rating<=0) return '—';
-  let s='';
-  for(let i=1;i<=max;i++){
-    if(rating>=i) s+='★';
-    else if(rating>=i-0.5) s+='½';
-    else s+='☆';
-  }
-  return s;
-}
 function setAccentVars(hex) {
   const r = parseInt(hex.slice(1,3),16)||0;
   const g = parseInt(hex.slice(3,5),16)||0;
@@ -99,11 +84,42 @@ async function searchAPI(query, type) {
       }));
     }
     if (type==='book'||type==='comic'||type==='novel') {
-      const url = `https://www.aladin.co.kr/ttb/api/ItemSearch.aspx?ttbkey=${API_KEYS.aladin}&Query=${encodeURIComponent(query)}&QueryType=Title&MaxResults=5&start=1&SearchTarget=Book&output=js&Version=20131101`;
-      const res  = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-      const data = await res.json();
-      return (data.item||[]).map(i=>({
-        title:  i.title.replace(/ *\([^)]*\) */g,''),
+      const rawUrl = `https://www.aladin.co.kr/ttb/api/ItemSearch.aspx?ttbkey=${API_KEYS.aladin}&Query=${encodeURIComponent(query)}&QueryType=Title&MaxResults=5&start=1&SearchTarget=Book&Cover=Big&output=js&Version=20131101`;
+      const proxyUrls = [
+        `https://corsproxy.io/?${encodeURIComponent(rawUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(rawUrl)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(rawUrl)}`
+      ];
+      const parseBookSearch = async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buffer = await res.arrayBuffer();
+        const text = new TextDecoder('utf-8').decode(buffer);
+        if (!text.trim()) throw new Error('Empty response');
+        const trimmed = text.trim();
+        const jsonp = trimmed.match(/^[^(]+\(([\s\S]*)\);?$/);
+        const parsed = JSON.parse(jsonp ? jsonp[1] : trimmed);
+        if (parsed.errorCode) throw new Error(parsed.errorMessage || `Aladin error ${parsed.errorCode}`);
+        return parsed;
+      };
+      const data = await Promise.any(
+        proxyUrls.map(proxyUrl =>
+          fetch(proxyUrl)
+            .then(parseBookSearch)
+            .catch(err => {
+              console.warn('[BookSearch] 프록시 실패:', proxyUrl, err);
+              throw err;
+            })
+        )
+      ).catch(err => {
+        console.error('[BookSearch] 모든 프록시 실패 또는 데이터 없음', err);
+        return null;
+      });
+      if (!data) {
+        return [];
+      }
+      const items = Array.isArray(data.item) ? data.item : (data.item ? [data.item] : []);
+      return items.map(i=>({
+        title:  (i.title||'').replace(/ *\([^)]*\) */g,''),
         cover:  i.cover?.replace(/\/cover(sum|200)?\//, '/cover500/') || i.cover,
         author: i.author,
         year:   i.pubDate?.substring(0,4),
@@ -120,16 +136,21 @@ async function migrateLegacyItems(uid) {
   if (localStorage.getItem(flag)) return;
   try {
     const batch = writeBatch(db);
-    let count = 0;
+    const pendingUpdates = [];
     for (const col of ['items','gameEvents','todos']) {
       const sn = await getDocs(collection(db, col));
-      sn.forEach(d => {
-        if (!d.data().userId) { batch.update(doc(db,col,d.id), {userId:uid}); count++; }
-      });
+      for (const d of sn.docs) {
+        if (!d.data().userId) pendingUpdates.push({ col, id:d.id });
+      }
     }
-    if (count > 0) await batch.commit();
+    pendingUpdates.forEach(({col,id}) => batch.update(doc(db,col,id), {userId:uid}));
+    const count = pendingUpdates.length;
+    if (count > 0) { await batch.commit(); console.log(`마이그레이션 완료: ${count}개`); }
+    else { console.log('마이그레이션: 대상 없음 (이미 완료됐거나 데이터 없음)'); }
     localStorage.setItem(flag, '1');
-  } catch(e) { console.error('Migration error:', e); }
+  } catch(e) {
+    console.error('마이그레이션 실패 (Firestore 규칙 확인 필요):', e.code, e.message);
+  }
 }
 
 /* ── AUTH SCREEN ── */
@@ -148,13 +169,14 @@ function AuthScreen() {
   const doLogin = async () => {
     if (!uname.trim() || !pw) return setErr('아이디와 비밀번호를 입력하세요');
     setLoading(true); clr();
+    const n = uname.trim().toLowerCase();
     try {
-      const snap = await getDoc(doc(db,'usernames', uname.trim().toLowerCase()));
-      if (!snap.exists()) { setErr('존재하지 않는 아이디입니다'); return; }
-      await signInWithEmailAndPassword(auth, snap.data().authEmail, pw);
-      localStorage.setItem('authUser', uname.trim().toLowerCase());
+      // 인증 이메일은 항상 {username}@helo.app — Firestore 조회 없이 바로 로그인
+      await signInWithEmailAndPassword(auth, `${n}@helo.app`, pw);
+      localStorage.setItem('authUser', n);
     } catch(e) {
-      setErr(['auth/wrong-password','auth/invalid-credential'].includes(e.code) ? '비밀번호가 틀렸습니다' : '로그인 실패');
+      setErr(e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'
+        ? '아이디 또는 비밀번호가 틀렸습니다' : '로그인 실패');
     } finally { setLoading(false); }
   };
 
@@ -168,12 +190,15 @@ function AuthScreen() {
     try {
       const ex = await getDoc(doc(db,'usernames', n));
       if (ex.exists()) { setErr('이미 사용 중인 아이디입니다'); return; }
-      const authEmail = email.trim() || `${n}@helo.app`;
+      const authEmail = `${n}@helo.app`; // 항상 synthetic email로 인증
       const cred = await createUserWithEmailAndPassword(auth, authEmail, pw);
-      await setDoc(doc(db,'usernames', n), { uid:cred.user.uid, authEmail, hasEmail:!!email.trim(), createdAt:new Date() });
+      await setDoc(doc(db,'usernames', n), {
+        uid: cred.user.uid, authEmail,
+        resetEmail: email.trim() || null, hasEmail: !!email.trim(), createdAt: new Date()
+      });
       localStorage.setItem('authUser', n);
     } catch(e) {
-      setErr(e.code==='auth/email-already-in-use' ? '이미 사용 중인 이메일입니다' : '가입 실패: '+e.message);
+      setErr(e.code==='auth/email-already-in-use' ? '이미 사용 중인 아이디입니다' : '가입 실패: '+e.message);
     } finally { setLoading(false); }
   };
 
@@ -463,7 +488,7 @@ export default function App() {
         )}
       </div>
 
-      {view==='cat' && type && (
+      {view==='cat' && type && !(type==='game' && gameTab==='diary') && (
         <button className="fab" onClick={()=>setShowAdd(true)}><span className="fab-plus">+</span></button>
       )}
 
@@ -487,7 +512,7 @@ export default function App() {
       </nav>
 
       {showAdd && type && <AddModal type={type} onClose={()=>setShowAdd(false)} />}
-      {selected && <DetailModal item={selected} initialTab={selectedInitTab} onClose={()=>{ setSelected(null); setSelectedInitTab('info'); }} />}
+      {selected && <DetailModal item={selected} initialTab={selectedInitTab} onClose={()=>{ setSelected(null); setSelectedInitTab('info'); }} allTags={[...new Set(items.filter(i=>i.type===selected.type).flatMap(i=>i.tags||[]))]} />}
       {dayPicker && (
         <DayPickSheet
           items={dayPicker.items} dateStr={dayPicker.dateStr}
@@ -505,7 +530,6 @@ export default function App() {
 function Home({ items, username, goals, onSelect }) {
   const ingCount = items.filter(i=>i.status==='ing').length;
   const ingByType  = items.reduce((a,i)=>{ if(i.status==='ing')  a[i.type]=(a[i.type]||0)+1; return a; },{});
-  const doneByType = items.reduce((a,i)=>{ if(i.status==='done') a[i.type]=(a[i.type]||0)+1; return a; },{});
 
   const thisYear   = new Date().getFullYear();
   const doneThisYear = items.filter(i=>{
@@ -569,16 +593,17 @@ function GameView({ items, groups, gameEvents, todos, gameTab, onGameTab, mode, 
   const searchRef = useRef(null);
   const allItems = STATUS_ORDER.flatMap(s=>groups[s]||[]);
   const displayItems = libStatus==='all' ? allItems : (groups[libStatus]||[]);
+  const { uid } = React.useContext(UserCtx);
 
   return (
     <div className="game-view">
       <div className="lib-sticky-header">
-        {gameTab==='main' ? (
+        {gameTab!=='lib' ? (
           <div className="lib-header">
             <div className="lib-header-row">
               <div>
                 <p className="lib-collection-lbl">GAMES</p>
-                <h2 className="lib-title">Calendar</h2>
+                <h2 className="lib-title">{gameTab==='diary'?'Diary':'Calendar'}</h2>
                 <div className="lib-sub-spacer"/>
               </div>
             </div>
@@ -606,6 +631,7 @@ function GameView({ items, groups, gameEvents, todos, gameTab, onGameTab, mode, 
         )}
         <div className="seg-ctrl">
           <button className={gameTab==='main'?'active':''} onClick={()=>onGameTab('main')}>캘린더</button>
+          <button className={gameTab==='diary'?'active':''} onClick={()=>onGameTab('diary')}>일기</button>
           <button className={gameTab==='lib'?'active':''} onClick={()=>onGameTab('lib')}>라이브러리</button>
         </div>
       </div>
@@ -638,6 +664,8 @@ function GameView({ items, groups, gameEvents, todos, gameTab, onGameTab, mode, 
           <GameTodo todos={todos} />
         </>
       )}
+
+      {gameTab==='diary' && uid && <GameDiary uid={uid} />}
 
       {gameTab==='lib' && (
         <>
@@ -958,84 +986,6 @@ function TodoItem({ todo, onToggle, onDelete }) {
         {dueStr && <span className={`todo-due${isUrgent?' todo-due-urgent':''}`}>{dueStr}</span>}
       </div>
       <button className="todo-del" onClick={()=>onDelete(todo.id)}>×</button>
-    </div>
-  );
-}
-
-/* ── LIBRARY GROUPS ── */
-function LibraryGroups({ groups, statuses, mode, onSelect }) {
-  const [statusView, setStatusView] = useState(null);
-
-  // table mode: grouped list
-  if (mode === 'table') {
-    return (
-      <div className="groups">
-        {STATUS_ORDER.map(sk=>{
-          const its=groups[sk]||[]; if(!its.length) return null;
-          const col=STATUS_COLORS[sk];
-          return (
-            <div key={sk} className="group">
-              <div className="group-hd" style={{background:col.bg}}>
-                <span className="group-dot" style={{background:col.dot}}/>
-                <span className="group-lbl">{statuses[sk]}</span>
-                <span className="group-cnt">{its.length}</span>
-              </div>
-              <div className="tlist">{its.map(i=>(
-                <div key={i.id} className="trow" onClick={()=>onSelect(i)}>
-                  <span className="trow-title">{i.title}</span>
-                  <span>{i.rating>0?'⭐'.repeat(i.rating):''}</span>
-                  <span className="trow-sub">{i.genre||'-'}</span>
-                  <span className="trow-sub">{i.price?`${parseFloat(i.price).toLocaleString()}원`:'-'}</span>
-                </div>
-              ))}</div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // album mode – status items detail
-  if (statusView) {
-    const its=groups[statusView]||[];
-    const col=STATUS_COLORS[statusView];
-    return (
-      <div className="sov-items-page">
-        <div className="sov-items-hd">
-          <button className="sov-back" onClick={()=>setStatusView(null)}>‹ 뒤로</button>
-          <span className="sov-items-title" style={{color:col.dot}}>{statuses[statusView]}</span>
-          <span className="sov-items-cnt">{its.length}</span>
-        </div>
-        <div className="status-grid">
-          {its.map(i=><StatusCard key={i.id} item={i} onClick={()=>onSelect(i)}/>)}
-        </div>
-      </div>
-    );
-  }
-
-  // album mode – overview
-  return (
-    <div className="sov-wrap">
-      {STATUS_ORDER.map(sk=>{
-        const its=groups[sk]||[]; if(!its.length) return null;
-        const col=STATUS_COLORS[sk];
-        return (
-          <div key={sk} className="sov-card" style={{background:col.bg}} onClick={()=>setStatusView(sk)}>
-            <div className="sov-card-hd">
-              <span className="sov-dot" style={{background:col.dot}}/>
-              <span className="sov-label">{statuses[sk]}</span>
-              <span className="sov-cnt">{its.length}</span>
-            </div>
-            <div className="sov-thumbs">
-              {its.slice(0,3).map(item=>(
-                item.cover
-                  ? <img key={item.id} src={item.cover} alt="" className="sov-thumb"/>
-                  : <div key={item.id} className="sov-thumb sov-ph">{TYPES[item.type]?.emoji||'📦'}</div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -1476,6 +1426,32 @@ function Settings({ accentColor, font, username, onAccentColor, onFont, onUserna
   const { uid, logout } = React.useContext(UserCtx);
   const authUsername = localStorage.getItem('authUser') || '';
   const fileRef = useRef();
+  const [showPwChange, setShowPwChange] = useState(false);
+  const [curPw, setCurPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwErr, setPwErr] = useState('');
+  const [pwOk, setPwOk] = useState('');
+
+  const handlePwChange = async () => {
+    if (!curPw) return setPwErr('현재 비밀번호를 입력하세요');
+    if (newPw.length < 6) return setPwErr('새 비밀번호는 6자 이상이어야 합니다');
+    if (newPw !== confirmPw) return setPwErr('새 비밀번호가 일치하지 않습니다');
+    setPwLoading(true); setPwErr(''); setPwOk('');
+    try {
+      const user = auth.currentUser;
+      const cred = EmailAuthProvider.credential(user.email, curPw);
+      await reauthenticateWithCredential(user, cred);
+      await updatePassword(user, newPw);
+      setPwOk('비밀번호가 변경되었습니다');
+      setCurPw(''); setNewPw(''); setConfirmPw('');
+      setTimeout(() => { setShowPwChange(false); setPwOk(''); }, 2000);
+    } catch(e) {
+      if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') setPwErr('현재 비밀번호가 틀렸습니다');
+      else setPwErr('실패: ' + e.message);
+    } finally { setPwLoading(false); }
+  };
   const handleExport = () => {
     const rows = items.map(i=>({
       제목:i.title||'', 유형:TYPES[i.type]?.name||'', 상태:STATUS[i.type]?.[i.status]||'',
@@ -1581,7 +1557,23 @@ function Settings({ accentColor, font, username, onAccentColor, onFont, onUserna
       <div className="setting-card">
         <h3>계정</h3>
         <p style={{fontSize:13,color:'var(--sub)',marginBottom:12}}><b style={{color:'var(--text)'}}>{authUsername}</b> 로 로그인 중</p>
-        <button className="data-btn" onClick={logout} style={{borderColor:'#FF3B30'}}>
+        <button className="data-btn" onClick={()=>{ setShowPwChange(v=>!v); setPwErr(''); setPwOk(''); setCurPw(''); setNewPw(''); setConfirmPw(''); }}>
+          <span>🔑</span><div><strong>비밀번호 변경</strong><p>현재 비밀번호 확인 후 새 비밀번호로 변경</p></div>
+        </button>
+        {showPwChange && (
+          <div className="pw-change-form">
+            <input className="pw-change-input" type="password" placeholder="현재 비밀번호" value={curPw} onChange={e=>{setCurPw(e.target.value);setPwErr('');setPwOk('');}} />
+            <input className="pw-change-input" type="password" placeholder="새 비밀번호 (6자 이상)" value={newPw} onChange={e=>{setNewPw(e.target.value);setPwErr('');setPwOk('');}} />
+            <input className="pw-change-input" type="password" placeholder="새 비밀번호 확인" value={confirmPw} onChange={e=>{setConfirmPw(e.target.value);setPwErr('');setPwOk('');}}
+              onKeyDown={e=>e.key==='Enter'&&handlePwChange()} />
+            {pwErr && <p className="pw-change-err">{pwErr}</p>}
+            {pwOk  && <p className="pw-change-ok">{pwOk}</p>}
+            <button className="pw-change-btn" onClick={handlePwChange} disabled={pwLoading}>
+              {pwLoading ? '변경 중…' : '변경하기'}
+            </button>
+          </div>
+        )}
+        <button className="data-btn" onClick={logout} style={{borderColor:'#FF3B30',marginTop:8}}>
           <span>🚪</span><div><strong style={{color:'#FF3B30'}}>로그아웃</strong><p>다른 계정으로 전환하려면 로그아웃하세요</p></div>
         </button>
       </div>
@@ -1679,10 +1671,7 @@ function AddModal({ type, onClose }) {
   );
 }
 
-/* ── DETAIL MODAL ── */
-const PROGRESS_UNIT = { game:'시간', video:'화', book:'페이지', novel:'페이지', comic:'화' };
-
-function DetailModal({ item, initialTab='info', onClose }) {
+function DetailModal({ item, initialTab='info', onClose, allTags=[] }) {
   const [data, setData] = useState({...item});
   const [tab, setTab]   = useState(initialTab);
   const [noteSearch, setNoteSearch] = useState('');
@@ -1691,9 +1680,14 @@ function DetailModal({ item, initialTab='info', onClose }) {
   const [noteSpeaker, setNoteSpkr]  = useState('');
   const [noteFile, setNoteFile]     = useState(null);
   const [notePreview, setNotePreview] = useState(null);
+  const [editingNoteIdx, setEditingNoteIdx] = useState(null);
   const [newTag, setNewTag]         = useState('');
+  const [tagSuggestions, setTagSuggestions] = useState([]);
+  const [tagColorOpen, setTagColorOpen] = useState(null);
   const coverFileRef = useRef(null);
   const titleRef = useRef(null);
+  const statusWrapRef = useRef(null);
+  const tagsWrapRef = useRef(null);
   const [statusOpen, setStatusOpen] = useState(false);
 
   useEffect(()=>{
@@ -1703,8 +1697,41 @@ function DetailModal({ item, initialTab='info', onClose }) {
     }
   }, [data.title]);
 
-  const update=async()=>{ onClose(); updateDoc(doc(db,'items',item.id),data); };
-  const remove=async()=>{ if(window.confirm('삭제?')){ onClose(); deleteDoc(doc(db,'items',item.id)); } };
+  useEffect(()=>{
+    if (!statusOpen) return;
+    const handler = e => {
+      if (statusWrapRef.current && !statusWrapRef.current.contains(e.target)) setStatusOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler); };
+  }, [statusOpen]);
+
+  useEffect(()=>{
+    if (!tagColorOpen) return;
+    const handler = e => {
+      if (tagsWrapRef.current && !tagsWrapRef.current.contains(e.target)) setTagColorOpen(null);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler); };
+  }, [tagColorOpen]);
+
+  const update = async () => {
+    try {
+      const { id, ...payload } = data;
+      await updateDoc(doc(db,'items',item.id), payload);
+      onClose();
+    } catch(e) { alert('저장 실패: ' + e.message); }
+  };
+  const remove = async () => {
+    if (window.confirm('삭제?')) {
+      try {
+        await deleteDoc(doc(db,'items',item.id));
+        onClose();
+      } catch(e) { alert('삭제 실패: ' + e.message); }
+    }
+  };
 
   const handleCoverFile = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -1723,7 +1750,7 @@ function DetailModal({ item, initialTab='info', onClose }) {
     setData({...data,...up});
   };
 
-  const STATUS_KO = { want:'위시', ing:'진행중', yet:'미정', done:'완료' };
+  const STATUS_KO = { want:'wish', ing:'ing', yet:'yet', done:'done' };
 
   const tagStyle = color => {
     if (!color) return {};
@@ -1731,18 +1758,27 @@ function DetailModal({ item, initialTab='info', onClose }) {
     return { background:`rgba(${r},${g},${b},.13)`, color };
   };
 
-  const cycleTagColor = t => {
-    const cur = (data.tagColors||{})[t];
-    const idx = cur ? TAG_COLORS.indexOf(cur) : -1;
-    const next = TAG_COLORS[(idx+1)%TAG_COLORS.length];
-    setData({...data, tagColors:{...(data.tagColors||{}),[t]:next}});
+  const setTagColor = (t, color) => {
+    setData(d => ({...d, tagColors:{...(d.tagColors||{}), [t]:color}}));
+    setTagColorOpen(null);
   };
 
-  const addTag=()=>{
-    if(!newTag.trim())return;
-    const tags=data.tags||[];
-    if(!tags.includes(newTag)) setData({...data,tags:[...tags,newTag]});
-    setNewTag('');
+  const addTag = (tagName) => {
+    const t = (tagName || newTag).trim();
+    if (!t) return;
+    const tags = data.tags || [];
+    if (!tags.includes(t)) setData(d => ({...d, tags:[...tags, t]}));
+    setNewTag(''); setTagSuggestions([]);
+  };
+
+  const removeTag = t => setData(d => ({...d, tags:(d.tags||[]).filter(x=>x!==t)}));
+
+  const handleTagInput = val => {
+    setNewTag(val);
+    if (val.trim()) {
+      const s = allTags.filter(t => t.toLowerCase().includes(val.toLowerCase()) && !(data.tags||[]).includes(t));
+      setTagSuggestions(s.slice(0,6));
+    } else { setTagSuggestions([]); }
   };
 
   const handleNoteFile=e=>{
@@ -1751,38 +1787,62 @@ function DetailModal({ item, initialTab='info', onClose }) {
     const r=new FileReader(); r.onloadend=()=>setNotePreview(r.result); r.readAsDataURL(f);
   };
 
-  const addNote=async()=>{
+  const resetNoteForm = () => {
+    setNoteText('');
+    setNoteSpkr('');
+    setNoteFile(null);
+    setNotePreview(null);
+    setEditingNoteIdx(null);
+  };
+
+  const saveNote=async()=>{
     let note = null;
+    const prevNote = editingNoteIdx !== null ? (data.notes||[])[editingNoteIdx] : null;
     if(noteType==='text'){
       if(!noteText.trim())return;
-      note={type:'text', text:noteText, date:new Date()};
+      note={type:'text', text:noteText, date:prevNote?.date||new Date()};
     } else if(noteType==='quote'){
       if(!noteText.trim())return;
-      note={type:'quote', text:noteText, speaker:noteSpeaker, date:new Date()};
+      note={type:'quote', text:noteText, speaker:noteSpeaker, date:prevNote?.date||new Date()};
     } else if(noteType==='photo'){
-      if(!noteFile)return;
-      let imageUrl=notePreview;
-      try {
-        const sr=ref(storage,`notes/${Date.now()}`);
-        await uploadBytes(sr,noteFile);
-        imageUrl=await getDownloadURL(sr);
-      } catch(e){ console.error(e); }
-      note={type:'photo', imageUrl, caption:noteText, date:new Date()};
+      if(!noteFile && !prevNote?.imageUrl)return;
+      let imageUrl=prevNote?.imageUrl||notePreview;
+      if(noteFile){
+        try {
+          const sr=ref(storage,`notes/${Date.now()}`);
+          await uploadBytes(sr,noteFile);
+          imageUrl=await getDownloadURL(sr);
+        } catch(e){ console.error(e); }
+      }
+      note={type:'photo', imageUrl, caption:noteText, date:prevNote?.date||new Date()};
     }
-    setData({...data, notes:[...(data.notes||[]),note]});
-    setNoteText(''); setNoteSpkr(''); setNoteFile(null); setNotePreview(null);
+    const notes = [...(data.notes||[])];
+    if(editingNoteIdx !== null) notes[editingNoteIdx] = note;
+    else notes.push(note);
+    setData({...data, notes});
+    resetNoteForm();
   };
 
   const removeNote=idx=>setData({...data, notes:(data.notes||[]).filter((_,i)=>i!==idx)});
+  const editNote=(idx)=>{
+    const n=(data.notes||[])[idx];
+    if(!n)return;
+    setEditingNoteIdx(idx);
+    setNoteType(n.type||'text');
+    setNoteText(n.type==='photo' ? (n.caption||'') : (n.text||''));
+    setNoteSpkr(n.speaker||'');
+    setNoteFile(null);
+    setNotePreview(n.imageUrl||null);
+  };
 
-  const filteredNotes=(data.notes||[]).filter(n=>{
-    if(!noteSearch) return true;
-    const q=noteSearch.toLowerCase();
-    return (n.text||'').toLowerCase().includes(q)||(n.speaker||'').toLowerCase().includes(q)||(n.caption||'').toLowerCase().includes(q);
-  });
-
-  const pct = data.progressTotal>0 && data.progressCurrent>0
-    ? Math.min(100, Math.round(data.progressCurrent/data.progressTotal*100)) : null;
+  const filteredNotesWithIndex=(data.notes||[])
+    .map((note,idx)=>({note,idx}))
+    .filter(({note:n})=>{
+      if(!noteSearch) return true;
+      const q=noteSearch.toLowerCase();
+      return (n.text||'').toLowerCase().includes(q)||(n.speaker||'').toLowerCase().includes(q)||(n.caption||'').toLowerCase().includes(q);
+    })
+    .sort((a,b)=>(toMs(b.note.date)||b.idx)-(toMs(a.note.date)||a.idx));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -1823,14 +1883,14 @@ function DetailModal({ item, initialTab='info', onClose }) {
               {(data.type==='book'||data.type==='novel'||data.type==='comic') && (
                 <div className="nprop-row">
                   <span className="nprop-icon"><PenLine size={14} strokeWidth={1.8}/></span>
-                  <span className="nprop-key">작가</span>
+                  <span className="nprop-key nprop-key-sm">작가</span>
                   <input type="text" className="nprop-input" value={data.author||''} onChange={e=>setData({...data,author:e.target.value})}/>
                 </div>
               )}
               {data.type==='video' && (
                 <div className="nprop-row">
                   <span className="nprop-icon"><Film size={14} strokeWidth={1.8}/></span>
-                  <span className="nprop-key">감독</span>
+                  <span className="nprop-key nprop-key-sm">감독</span>
                   <input type="text" className="nprop-input" value={data.director||''} onChange={e=>setData({...data,director:e.target.value})}/>
                 </div>
               )}
@@ -1841,11 +1901,10 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 <StarInput value={data.rating||0} onChange={v=>setData({...data,rating:v})}/>
               </div>
 
-              <div className="nprop-row">
+              <div className="nprop-row nprop-row-lg">
                 <span className="nprop-icon"><Circle size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">상태</span>
-                <div className="status-pill-wrap">
-                  {statusOpen && <div className="status-backdrop" onClick={()=>setStatusOpen(false)}/>}
+                <div className="status-pill-wrap" ref={statusWrapRef}>
                   <button className={`status-pill ${data.status||'want'} active`} onClick={()=>setStatusOpen(o=>!o)}>
                     {STATUS_KO[data.status||'want']}
                   </button>
@@ -1865,30 +1924,66 @@ function DetailModal({ item, initialTab='info', onClose }) {
               <div className="nprop-row nprop-tags-row">
                 <span className="nprop-icon"><Tag size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">태그</span>
-                <div className="nprop-tags-val">
-                  {(data.tags||[]).map(t=>{
-                    const color=(data.tagColors||{})[t];
-                    return (
-                      <span key={t} className="tag" style={tagStyle(color)}>
-                        <button className="tag-color-dot" style={{background:color||'var(--accent)'}} onClick={()=>cycleTagColor(t)}/>
-                        #{t}
-                        <button className="tag-x" onClick={()=>setData({...data,tags:(data.tags||[]).filter(x=>x!==t)})}>×</button>
-                      </span>
-                    );
-                  })}
-                  <input type="text" className="nprop-tag-input" placeholder="+" value={newTag}
-                    onChange={e=>setNewTag(e.target.value)}
-                    onKeyPress={e=>e.key==='Enter'&&addTag()}/>
+                <div className="nprop-tags-outer" ref={tagsWrapRef}>
+                  {/* 가로 스크롤 영역: 태그 + 입력창 */}
+                  <div className="nprop-tags-inline">
+                    {(data.tags||[]).map(t=>{
+                      const color=(data.tagColors||{})[t];
+                      return (
+                        <span key={t} className={`tag tag-clickable${tagColorOpen===t?' tag-active':''}`}
+                          style={tagStyle(color)}
+                          onClick={()=>setTagColorOpen(tagColorOpen===t?null:t)}>
+                          #{t}
+                          <button className="tag-x" onClick={e=>{e.stopPropagation();removeTag(t);}}>×</button>
+                        </span>
+                      );
+                    })}
+                    <input type="text" className="nprop-tag-input"
+                      placeholder={!(data.tags||[]).length?'태그 추가':''}
+                      value={newTag}
+                      onChange={e=>handleTagInput(e.target.value)}
+                      onFocus={()=>{
+                        if(!newTag.trim()){
+                          const s=allTags.filter(t=>!(data.tags||[]).includes(t));
+                          setTagSuggestions(s.slice(0,6));
+                        }
+                      }}
+                      onKeyDown={e=>{
+                        if(e.key==='Enter'){e.preventDefault();addTag();}
+                        if(e.key==='Backspace'&&!newTag&&(data.tags||[]).length) removeTag((data.tags||[]).at(-1));
+                      }}
+                      onBlur={()=>setTimeout(()=>setTagSuggestions([]),150)}
+                    />
+                  </div>
+                  {/* 오버레이들: scroll 컨테이너 밖, outer 안 */}
+                  {tagColorOpen&&(
+                    <div className="tag-color-picker">
+                      {TAG_COLORS.map(c=>{
+                        const cur=(data.tagColors||{})[tagColorOpen];
+                        return (
+                          <button key={c} className={`tag-color-opt${cur===c?' sel':''}`}
+                            style={{background:c}} onMouseDown={()=>setTagColor(tagColorOpen,c)}/>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {tagSuggestions.length>0&&(
+                    <div className="tag-suggestions">
+                      {tagSuggestions.map(s=>(
+                        <button key={s} className="tag-suggestion-item" onMouseDown={()=>addTag(s)}>#{s}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="nprop-row">
                 <span className="nprop-icon"><MessageSquare size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">한줄평</span>
+                <span className="nprop-key nprop-key-sm">한줄평</span>
                 <input type="text" className="nprop-input" value={data.oneliner||''} onChange={e=>setData({...data,oneliner:e.target.value})} placeholder="한 줄로 남겨요"/>
               </div>
 
-              <div className="nprop-row">
+              <div className="nprop-row nprop-row-date">
                 <span className="nprop-icon"><Calendar size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key">날짜</span>
                 <div className="nprop-dates">
@@ -1902,7 +1997,7 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 </div>
               </div>
 
-              <div className="nprop-row">
+              <div className="nprop-row nprop-row-lg-b">
                 <span className="nprop-icon"><Repeat2 size={14} strokeWidth={1.8}/></span>
                 <span className="nprop-key nprop-key-replay">{REPLAY_LABEL[data.type]||'반복'}</span>
                 <div className="replay-row">
@@ -1915,8 +2010,11 @@ function DetailModal({ item, initialTab='info', onClose }) {
 
               <div className="nprop-row">
                 <span className="nprop-icon"><Wallet size={14} strokeWidth={1.8}/></span>
-                <span className="nprop-key">가격</span>
-                <input type="number" className="nprop-input" value={data.price||''} onChange={e=>setData({...data,price:e.target.value})} placeholder="원"/>
+                <span className="nprop-key nprop-key-sm">가격</span>
+                <input type="text" inputMode="numeric" className="nprop-input"
+                  value={data.price ? Number(String(data.price).replace(/,/g,'')).toLocaleString('ko-KR') : ''}
+                  onChange={e=>{const raw=e.target.value.replace(/[^0-9]/g,''); setData({...data,price:raw||''}); }}
+                  placeholder="원"/>
               </div>
 
               {data.cover && (
@@ -1962,22 +2060,34 @@ function DetailModal({ item, initialTab='info', onClose }) {
                 {noteType==='text'&&(
                   <textarea placeholder="메모 추가" value={noteText} onChange={e=>setNoteText(e.target.value)} rows="3"/>
                 )}
-                <button className="btn-primary" style={{marginTop:8,width:'100%'}} onClick={addNote}>추가</button>
+                <div className="note-form-actions">
+                  {editingNoteIdx !== null && (
+                    <button className="btn-ghost note-cancel-edit" onClick={resetNoteForm}>취소</button>
+                  )}
+                  <button className="btn-primary" onClick={saveNote}>
+                    {editingNoteIdx !== null ? '수정 완료' : '추가'}
+                  </button>
+                </div>
               </div>
               <div className="notes-list">
-                {filteredNotes.map((n,i)=>(
-                  <div key={i} className={`note-item note-${n.type||'text'}`}>
+                {filteredNotesWithIndex.map(({note:n,idx})=>(
+                  <div key={idx} className={`note-item note-${n.type||'text'}`}>
                     {n.type==='photo'&&n.imageUrl&&<img src={n.imageUrl} alt={n.caption} className="note-photo"/>}
                     {n.type==='quote'&&<span className="quote-mark">"</span>}
                     <p>{n.type==='photo'?n.caption:n.text}</p>
                     {n.type==='quote'&&n.speaker&&<p className="speaker">— {n.speaker}</p>}
                     <div className="note-foot">
                       <small>{new Date(toMs(n.date)||0).toLocaleDateString()}</small>
-                      <button className="note-del" onClick={()=>removeNote(i)}>×</button>
+                      <div className="note-actions">
+                        <button className="note-action note-edit" title="수정" onClick={()=>editNote(idx)}>
+                          <PenLine size={14} strokeWidth={1.8}/>
+                        </button>
+                        <button className="note-action note-del" title="삭제" onClick={()=>removeNote(idx)}>×</button>
+                      </div>
                     </div>
                   </div>
                 ))}
-                {filteredNotes.length===0&&<p className="empty-note">메모 없음</p>}
+                {filteredNotesWithIndex.length===0&&<p className="empty-note">메모 없음</p>}
               </div>
             </>
           )}
