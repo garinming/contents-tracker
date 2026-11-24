@@ -126,6 +126,164 @@ async function loadCover(url) {
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const link = (go, id) => `${APP_URL}?go=${go}${id ? `&item=${encodeURIComponent(id)}` : ''}`;
+// 위젯 버튼 → Safari 대신 이 스크립트를 다시 실행해서 바로 쓰기 창을 띄움
+const runLink = (action, id) =>
+  `scriptable:///run/${encodeURIComponent(Script.name())}?action=${action}&item=${encodeURIComponent(id)}`;
+
+/* ── Firestore REST ── */
+const DOCS = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
+const authHeaders = auth => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${auth.idToken}` });
+
+async function getItem(auth, id) {
+  const r = new Request(`${DOCS}/items/${id}`);
+  r.headers = authHeaders(auth);
+  const d = await r.loadJSON();
+  if (d.error) throw new Error(d.error.message);
+  const f = d.fields || {};
+  return {
+    id,
+    title: f.title?.stringValue || '제목 없음',
+    type: f.type?.stringValue || 'game',
+    review: f.review?.stringValue || '',
+    rating: Number(f.rating?.doubleValue ?? f.rating?.integerValue ?? 0) || 0,
+  };
+}
+
+async function saveDiary(auth, itemId, { text, date, photos }) {
+  const d = await postJSON(`${DOCS}/gameDiary`, JSON.stringify({ fields: {
+    date: { stringValue: date },
+    text: { stringValue: text },
+    photos: { arrayValue: { values: photos.map(p => ({ stringValue: p })) } },
+    createdAt: { timestampValue: new Date().toISOString() },
+    userId: { stringValue: auth.uid },
+    itemId: { stringValue: itemId },
+  } }), authHeaders(auth));
+  if (d.error) throw new Error(d.error.message);
+}
+
+async function saveReview(auth, itemId, { review, rating }) {
+  const r = new Request(`${DOCS}/items/${itemId}?updateMask.fieldPaths=review&updateMask.fieldPaths=rating`);
+  r.method = 'PATCH';
+  r.headers = authHeaders(auth);
+  r.body = JSON.stringify({ fields: { review: { stringValue: review }, rating: { doubleValue: rating } } });
+  const d = await r.loadJSON();
+  if (d.error) throw new Error(d.error.message);
+}
+
+/* ── 바로 쓰기 창 (WebView 시트) ── */
+function sheetHTML(mode, item) {
+  const t = TYPES[item.type] || TYPES.game;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const isDiary = mode === 'diary';
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<style>
+:root{--a:#FF6B9D;--at:rgba(255,107,157,.13);--bg:#fff;--card:#F6F6F8;--text:#1A1A2E;--sub:#8E8E93;--line:#ECECEF}
+@media(prefers-color-scheme:dark){:root{--bg:#1C1C1E;--card:#2C2C2E;--text:#F5F5F7;--sub:#98989F;--line:#38383A;--at:rgba(255,107,157,.22)}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--text);padding:22px 18px 40px;-webkit-font-smoothing:antialiased}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--line);margin:-10px auto 16px}
+.lab{font-size:12px;font-weight:800;color:var(--a);letter-spacing:.4px}
+h1{font-size:22px;font-weight:800;margin:3px 0 16px;line-height:1.25}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.chip{position:relative;padding:8px 14px;border-radius:999px;background:var(--card);font-size:14px;font-weight:600;color:var(--sub);overflow:hidden}
+.chip input{position:absolute;inset:0;opacity:0;width:100%}
+.chip.on{background:var(--at);color:var(--a)}
+textarea{width:100%;min-height:150px;border:none;outline:none;resize:none;background:var(--card);color:var(--text);border-radius:16px;padding:14px;font:inherit;font-size:17px;line-height:1.55}
+.thumbs{display:flex;gap:8px;overflow-x:auto;margin-bottom:12px}
+.thumbs:empty{display:none}
+.th{position:relative;flex-shrink:0}
+.th img{width:84px;height:84px;object-fit:cover;border-radius:12px;display:block}
+.th b{position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center}
+.stars{display:flex;gap:4px;margin-bottom:12px}
+.stars span{font-size:32px;color:var(--line);position:relative;line-height:1}
+.stars span.f{color:var(--a)}
+.stars span.h{background:linear-gradient(90deg,var(--a) 50%,var(--line) 50%);-webkit-background-clip:text;color:transparent}
+.save{display:block;width:100%;margin-top:14px;padding:16px;border:none;border-radius:16px;background:var(--a);color:#fff;font-size:17px;font-weight:700}
+.save:disabled{opacity:.45}
+.done{display:none;text-align:center;padding:60px 0}
+.done .big{font-size:52px}
+.done p{margin-top:10px;font-size:17px;font-weight:700}
+.done small{display:block;margin-top:6px;color:var(--sub);font-size:14px}
+</style></head><body>
+<div class="grab"></div>
+<div id="form">
+  <p class="lab">${t.emoji} ${isDiary ? 'GAME DIARY' : 'REVIEW'}</p>
+  <h1>${esc(item.title)}</h1>
+  ${isDiary ? `
+  <div class="row">
+    <label class="chip" id="pbtn">📷 사진<input id="file" type="file" accept="image/*" multiple></label>
+    <label class="chip" id="dchip"><span id="dlabel">오늘</span><input id="date" type="date"></label>
+  </div>
+  <div class="thumbs" id="thumbs"></div>
+  <textarea id="text" placeholder="오늘 게임 어땠어요? 몇 마디 남겨보세요"></textarea>
+  ` : `
+  <div class="stars" id="stars"></div>
+  <textarea id="text" placeholder="리뷰를 남겨보세요...">${esc(item.review)}</textarea>
+  `}
+  <button class="save" id="save">${isDiary ? '기록' : '저장'}</button>
+</div>
+<div class="done" id="done"><div class="big">✓</div><p>저장했어요</p><small>아래로 쓸어내려 닫아주세요</small></div>
+<script>
+var MODE=${JSON.stringify(mode)};
+var photos=[];var MAX=4;
+function today(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function compress(file,budget){return new Promise(function(res,rej){var u=URL.createObjectURL(file);var img=new Image();img.onload=function(){var lv=[[1440,.82],[1280,.78],[1080,.72],[900,.66],[720,.6],[560,.55]];var out=null;for(var i=0;i<lv.length;i++){var s=Math.min(1,lv[i][0]/Math.max(img.naturalWidth,img.naturalHeight));var c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);out=c.toDataURL('image/jpeg',lv[i][1]);if(out.length<=budget)break;}URL.revokeObjectURL(u);res(out);};img.onerror=function(){rej(new Error('사진을 읽지 못했어요'));};img.src=u;});}
+if(MODE==='diary'){
+  var dateEl=document.getElementById('date');dateEl.value=today();dateEl.max=today();
+  dateEl.onchange=function(){if(!dateEl.value)dateEl.value=today();var on=dateEl.value!==today();document.getElementById('dchip').className='chip'+(on?' on':'');var p=dateEl.value.split('-');document.getElementById('dlabel').textContent=on?(+p[1])+'월 '+(+p[2])+'일':'오늘';};
+  var files=[];
+  function draw(){var t=document.getElementById('thumbs');t.innerHTML='';files.forEach(function(f,i){var d=document.createElement('div');d.className='th';d.innerHTML='<img src="'+f.url+'"><b>×</b>';d.querySelector('b').onclick=function(){files.splice(i,1);draw();};t.appendChild(d);});document.getElementById('pbtn').firstChild.textContent=files.length?'📷 '+files.length+'/'+MAX:'📷 사진';}
+  document.getElementById('file').onchange=function(e){var add=[].slice.call(e.target.files||[]);e.target.value='';add.slice(0,MAX-files.length).forEach(function(f){files.push({file:f,url:URL.createObjectURL(f)});});draw();};
+} else {
+  var rating=${item.rating || 0};
+  function stars(){var s=document.getElementById('stars');s.innerHTML='';for(var n=1;n<=5;n++){(function(n){var e=document.createElement('span');e.textContent='★';e.className=rating>=n?'f':(rating>=n-.5?'h':'');e.onclick=function(ev){var half=ev.offsetX<e.offsetWidth/2;var v=half?n-.5:n;rating=(rating===v)?0:v;stars();};s.appendChild(e);})(n);}}
+  stars();
+}
+var ta=document.getElementById('text');setTimeout(function(){ta.focus();},350);
+var send=null;
+function finish(){document.getElementById('form').style.display='none';document.getElementById('done').style.display='block';}
+document.getElementById('save').onclick=function(){
+  var b=this;var text=ta.value.trim();
+  if(MODE==='diary'&&!text&&!files.length)return;
+  b.disabled=true;b.textContent='저장 중…';
+  var job=MODE==='diary'
+    ? (function(){var budget=Math.floor((900000-text.length*3)/Math.max(1,files.length));return files.reduce(function(p,f){return p.then(function(){return compress(f.file,budget).then(function(x){photos.push(x);});});},Promise.resolve()).then(function(){return {text:text,date:dateEl.value||today(),photos:photos};});})()
+    : Promise.resolve({review:ta.value,rating:rating});
+  job.then(function(v){send&&send(JSON.stringify(v));},function(err){alert(err.message);b.disabled=false;b.textContent='다시 시도';});
+};
+</script></body></html>`;
+}
+
+async function openSheet(mode, itemId) {
+  const auth = await getAuth();
+  if (!auth) return;
+  let item;
+  try { item = await getItem(auth, itemId); } catch (e) {
+    const a = new Alert(); a.title = '불러오지 못했어요'; a.message = String(e.message || e); a.addAction('확인'); await a.presentAlert();
+    return;
+  }
+  const wv = new WebView();
+  await wv.loadHTML(sheetHTML(mode, item));
+  const closed = wv.present(false);
+  // 저장 버튼을 누를 때까지 기다림 (창을 닫으면 취소)
+  const waitSave = async () => {
+    for (;;) {
+      const raw = await wv.evaluateJavaScript('send = function(v){ send = null; completion(v); };', true);
+      const data = JSON.parse(raw);
+      try {
+        if (mode === 'diary') await saveDiary(auth, item.id, data);
+        else await saveReview(auth, item.id, data);
+        await wv.evaluateJavaScript('finish()');
+        return;
+      } catch (e) {
+        await wv.evaluateJavaScript(`alert(${JSON.stringify('저장 실패: ' + (e.message || e))}); var b=document.getElementById('save'); b.disabled=false; b.textContent='다시 시도';`);
+      }
+    }
+  };
+  await Promise.race([closed, waitSave()]);
+  await closed;
+}
 
 /* ── 위젯 그리기 ── */
 function baseWidget() {
@@ -255,7 +413,7 @@ async function buildWidget(items) {
   buttons.forEach((b, i) => {
     const t = TYPES[b.type];
     const label = i === 0 ? t.btn : `${t.btn} · ${b.item.title}`;
-    addButton(right, t.emoji, label, link(t.go, b.item.id), i === 0);
+    addButton(right, t.emoji, label, runLink(t.go, b.item.id), i === 0);
     if (i < buttons.length - 1) right.addSpacer(6);
   });
 
@@ -264,6 +422,14 @@ async function buildWidget(items) {
 
 /* ── 실행 ── */
 async function run() {
+  // 위젯 버튼으로 실행된 경우: 바로 쓰기 창
+  const q = args.queryParameters || {};
+  if (config.runsInApp && (q.action === 'diary' || q.action === 'review') && q.item) {
+    await openSheet(q.action, q.item);
+    Script.complete();
+    return;
+  }
+
   if (config.runsInApp && Keychain.contains(KC_KEY)) {
     const a = new Alert();
     a.title = '내 컬렉션 위젯';
