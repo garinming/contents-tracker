@@ -241,7 +241,8 @@ if(MODE==='diary'){
   stars();
 }
 var ta=document.getElementById('text');setTimeout(function(){ta.focus();},350);
-var send=null;
+window.__result='';
+function failSave(msg){alert(msg);var b=document.getElementById('save');b.disabled=false;b.textContent='다시 시도';}
 function finish(){document.getElementById('form').style.display='none';document.getElementById('done').style.display='block';}
 document.getElementById('save').onclick=function(){
   var b=this;var text=ta.value.trim();
@@ -250,7 +251,7 @@ document.getElementById('save').onclick=function(){
   var job=MODE==='diary'
     ? (function(){var budget=Math.floor((900000-text.length*3)/Math.max(1,files.length));return files.reduce(function(p,f){return p.then(function(){return compress(f.file,budget).then(function(x){photos.push(x);});});},Promise.resolve()).then(function(){return {text:text,date:dateEl.value||today(),photos:photos};});})()
     : Promise.resolve({review:ta.value,rating:rating});
-  job.then(function(v){send&&send(JSON.stringify(v));},function(err){alert(err.message);b.disabled=false;b.textContent='다시 시도';});
+  job.then(function(v){window.__result=JSON.stringify(v);},function(err){failSave(err.message);});
 };
 </script></body></html>`;
 }
@@ -265,23 +266,27 @@ async function openSheet(mode, itemId) {
   }
   const wv = new WebView();
   await wv.loadHTML(sheetHTML(mode, item));
-  const closed = wv.present(false);
-  // 저장 버튼을 누를 때까지 기다림 (창을 닫으면 취소)
-  const waitSave = async () => {
-    for (;;) {
-      const raw = await wv.evaluateJavaScript('send = function(v){ send = null; completion(v); };', true);
+  let isClosed = false;
+  const closed = wv.present(false).then(() => { isClosed = true; });
+  const sleep = ms => new Promise(r => Timer.schedule(ms, false, r));
+  // 저장 버튼이 눌릴 때까지 0.4초마다 확인 (창을 닫으면 끝). 평가식은 항상 문자열을 돌려줌.
+  const READ = "(function(){var r=window.__result||'';window.__result='';return String(r);})()";
+  while (!isClosed) {
+    await sleep(400);
+    if (isClosed) break;
+    let raw = '';
+    try { raw = await wv.evaluateJavaScript(READ); } catch (e) { raw = ''; }
+    if (!raw) continue;
+    try {
       const data = JSON.parse(raw);
-      try {
-        if (mode === 'diary') await saveDiary(auth, item.id, data);
-        else await saveReview(auth, item.id, data);
-        await wv.evaluateJavaScript('finish()');
-        return;
-      } catch (e) {
-        await wv.evaluateJavaScript(`alert(${JSON.stringify('저장 실패: ' + (e.message || e))}); var b=document.getElementById('save'); b.disabled=false; b.textContent='다시 시도';`);
-      }
+      if (mode === 'diary') await saveDiary(auth, item.id, data);
+      else await saveReview(auth, item.id, data);
+      await wv.evaluateJavaScript("finish(); 'ok'");
+    } catch (e) {
+      const msg = JSON.stringify('저장 실패: ' + (e.message || e));
+      try { await wv.evaluateJavaScript(`failSave(${msg}); 'ok'`); } catch (e2) { /* ignore */ }
     }
-  };
-  await Promise.race([closed, waitSave()]);
+  }
   await closed;
 }
 
