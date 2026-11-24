@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>내 컬렉션 위젯</title>
+<style>
+  :root { --accent:#FF6B9D; --bg:#F8F9FA; --card:#fff; --text:#1A1A2E; --sub:#8E8E93; --line:#EFEFEF; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111113; --card:#1C1C1E; --text:#F5F5F7; --sub:#98989F; --line:#2C2C2E; }
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:var(--text);
+         padding:max(24px, env(safe-area-inset-top)) 16px 40px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  main { max-width:480px; margin:0 auto; }
+  .lbl { font-size:12px; font-weight:800; color:var(--accent); letter-spacing:.5px; }
+  h1 { font-size:26px; font-weight:800; margin:4px 0 6px; }
+  .lead { color:var(--sub); font-size:14px; margin-bottom:20px; }
+  .card { background:var(--card); border-radius:18px; padding:18px; box-shadow:0 2px 12px rgba(0,0,0,.06); margin-bottom:14px; }
+  ol { padding-left:20px; display:flex; flex-direction:column; gap:10px; font-size:15px; }
+  li b { color:var(--accent); }
+  .btn { display:block; width:100%; padding:15px; border:none; border-radius:14px; background:var(--accent); color:#fff;
+         font-size:16px; font-weight:700; cursor:pointer; margin-bottom:10px; text-align:center; text-decoration:none; }
+  .btn.ghost { background:none; color:var(--accent); border:1.5px solid var(--accent); }
+  .btn:disabled { opacity:.5; }
+  .msg { text-align:center; font-size:13px; color:var(--sub); min-height:20px; }
+  .note { font-size:13px; color:var(--sub); }
+  .note + .note { margin-top:8px; }
+  .preview { display:flex; gap:12px; padding:12px; border-radius:22px; background:linear-gradient(135deg,#FFF1F6,#fff);
+             border:1px solid var(--line); margin-bottom:14px; }
+  @media (prefers-color-scheme: dark) { .preview { background:linear-gradient(135deg,#2B1D24,#1C1C1E); } }
+  .pv-cover { width:72px; height:100px; border-radius:12px; background:#F2F2F7; display:flex; align-items:center; justify-content:center; font-size:28px; flex-shrink:0; }
+  @media (prefers-color-scheme: dark) { .pv-cover { background:#2C2C2E; } }
+  .pv-right { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .pv-lab { font-size:10px; font-weight:900; color:var(--accent); }
+  .pv-title { font-size:15px; font-weight:800; margin-top:2px; }
+  .pv-btns { margin-top:auto; display:flex; flex-direction:column; gap:5px; }
+  .pv-btn { height:26px; border-radius:13px; background:var(--accent); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; padding:0 10px; }
+  .pv-btn.sub { background:rgba(255,107,157,.15); color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <p class="lbl">IPHONE WIDGET</p>
+  <h1>내 컬렉션 위젯</h1>
+  <p class="lead">홈 화면에서 지금 하고 있는 걸 보고, 바로 일기·리뷰를 쓸 수 있어요.</p>
+
+  <div class="preview" aria-hidden="true">
+    <div class="pv-cover">🎮</div>
+    <div class="pv-right">
+      <span class="pv-lab">🎮 NOW PLAYING · 3개 진행 중</span>
+      <span class="pv-title">게임 제목</span>
+      <div class="pv-btns">
+        <span class="pv-btn">🎮 게임 일기 ›</span>
+        <span class="pv-btn sub">🎬 리뷰 쓰기 · 영화 제목 ›</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <button class="btn" id="copy" disabled>불러오는 중…</button>
+    <a class="btn ghost" href="https://apps.apple.com/app/scriptable/id1405459188">Scriptable 앱 받기 (무료)</a>
+    <p class="msg" id="msg"></p>
+  </div>
+
+  <div class="card">
+    <ol>
+      <li><b>Scriptable</b> 앱을 설치해요.</li>
+      <li>위의 <b>코드 복사</b>를 눌러요.</li>
+      <li>Scriptable을 열고 오른쪽 위 <b>＋</b> → 빈 화면에 붙여넣기 → 제목을 "내 컬렉션"으로 바꿔요.</li>
+      <li>▶︎ 실행 버튼을 눌러 <b>웹앱 아이디/비밀번호로 로그인</b>해요. (처음 한 번만)</li>
+      <li>홈 화면을 길게 눌러 <b>＋</b> → Scriptable → <b>중간 크기</b> 위젯을 추가해요.</li>
+      <li>위젯을 길게 눌러 <b>위젯 편집</b> → Script에서 "내 컬렉션"을 골라요.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <p class="note">• 비밀번호는 저장되지 않아요. 로그인 토큰만 iPhone 키체인에 보관돼요.</p>
+    <p class="note">• 위젯은 약 30분마다 새로 고쳐지고, 진행 중인 게 여러 개면 매번 랜덤으로 바뀌어요.</p>
+    <p class="note">• 버튼을 누르면 Safari로 열려요. Safari에서도 한 번 로그인해 두세요.</p>
+  </div>
+</main>
+<script>
+  (function () {
+    var btn = document.getElementById('copy');
+    var msg = document.getElementById('msg');
+    var code = '';
+    fetch('widget.js', { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then(function (t) { code = t; btn.disabled = false; btn.textContent = '코드 복사'; })
+      .catch(function () { btn.textContent = '불러오기 실패 — 새로고침 해주세요'; });
+
+    function fallbackCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0, text.length);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    }
+    function done(ok) {
+      msg.textContent = ok ? '복사됐어요! Scriptable에 붙여넣기 하세요 ✨' : '복사에 실패했어요. 다시 눌러주세요.';
+    }
+    btn.addEventListener('click', function () {
+      if (!code) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(function () { done(true); }, function () { done(fallbackCopy(code)); });
+      } else {
+        done(fallbackCopy(code));
+      }
+    });
+  })();
+</script>
+</body>
+</html>
